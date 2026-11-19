@@ -22,7 +22,7 @@ class MarketDataHub {
     this._dirty = new Map();
     this.maxDirtyCandles = options.maxDirtyCandles == null ? 100_000 : Number(options.maxDirtyCandles);
     if (!Number.isInteger(this.maxDirtyCandles) || this.maxDirtyCandles < unique.length || this.maxDirtyCandles > 5_000_000) throw new RangeError('maxDirtyCandles должен быть не меньше числа таймфреймов и не больше 5000000');
-    this.stats = { acceptedTicks: 0, rejectedTicks: 0, rejectedAssets: 0, restoredCandles: 0, backpressureTicks: 0 };
+    this.stats = { acceptedTicks: 0, rejectedTicks: 0, rejectedAssets: 0, restoredCandles: 0, backpressureTicks: 0, historicalCandlesReceived: 0, historicalCandlesSkipped: 0 };
   }
 
   ingest(rawTick) {
@@ -94,6 +94,43 @@ class MarketDataHub {
   getPreEntryWindow(asset, timeframe, entryAt, lookback) {
     const series = this._assets.get(String(asset || '').trim().toUpperCase())?.get(String(timeframe || '').toUpperCase());
     return series ? series.getPreEntryWindow(entryAt, lookback) : [];
+  }
+
+  ingestHistoricalCandles(candles, asOf = Date.now()) {
+    if (!Array.isArray(candles)) throw new TypeError('candles должен быть массивом');
+    const now = Number(asOf);
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('asOf должен быть Unix timestamp в миллисекундах');
+    let accepted = 0, skipped = 0;
+    for (const candle of candles) {
+      const asset = String(candle?.asset || '').trim().toUpperCase();
+      const timeframe = String(candle?.timeframe || '').toUpperCase();
+      if (!asset || !this.timeframes.includes(timeframe) || candle.complete !== true || Number(candle.endAt) > now) {
+        skipped++; continue;
+      }
+      const key = asset + '\u0000' + timeframe + '\u0000' + Number(candle.startAt);
+      if (!this._dirty.has(key) && this._dirty.size >= this.maxDirtyCandles) {
+        this.stats.backpressureTicks++; skipped++; continue;
+      }
+      let assetSeries = this._assets.get(asset);
+      if (!assetSeries) {
+        if (this._assets.size >= this.maxAssets) { skipped++; continue; }
+        assetSeries = new Map();
+        for (const tf of this.timeframes) assetSeries.set(tf, new CandleSeries({ asset, timeframe: tf, maxCandles: this.maxCandlesPerSeries }));
+        this._assets.set(asset, assetSeries);
+      }
+      try {
+        const series = assetSeries.get(timeframe);
+        series.restoreCandle({ ...candle, asset, timeframe });
+        const snapshot = series.getCandles({ asOf: now, includeIncomplete: true }).find(item => item.startAt === Number(candle.startAt));
+        if (!snapshot) { skipped++; continue; }
+        const previous = this._dirty.get(key);
+        this._dirty.set(key, { key, revision: (previous?.revision || 0) + 1, candle: snapshot });
+        accepted++;
+      } catch (_) { skipped++; }
+    }
+    this.stats.historicalCandlesReceived += accepted;
+    this.stats.historicalCandlesSkipped += skipped;
+    return { accepted, skipped };
   }
 
   getDirtyCompletedCandles(asOf = Date.now()) {
