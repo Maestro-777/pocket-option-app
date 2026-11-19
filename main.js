@@ -52,7 +52,6 @@ let marketStatusPublishTimer = null;
 let marketPersistenceTimer = null;
 let marketPersistenceError = null;
 let persistedCatalogRevision = -1;
-let marketLastPruneAt = 0;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -275,11 +274,6 @@ function persistMarketDataSafely() {
     if (catalog && catalog.revision !== persistedCatalogRevision) {
       marketDataStore.upsertCatalog(catalog.listAll());
       persistedCatalogRevision = catalog.revision;
-    }
-    const now = Date.now();
-    if (now - marketLastPruneAt >= 60_000) {
-      marketDataStore.pruneCandles(1000);
-      marketLastPruneAt = now;
     }
     if (marketPersistenceError) {
       marketPersistenceError = null;
@@ -769,7 +763,6 @@ else app.whenReady().then(async () => {
   try {
     marketDataStore = new MarketDataStore(path.join(userRoot(), 'market-data.sqlite'));
     marketDataStore.pruneCandles(1000);
-    marketLastPruneAt = Date.now();
     log('info', 'SQLite хранилище рыночных данных открыто', marketDataStore.getStats());
   } catch (error) {
     marketPersistenceError = String(error?.message || error);
