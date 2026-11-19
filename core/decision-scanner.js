@@ -163,6 +163,7 @@ class DecisionScanner {
         reason: result.reason, paramsSnapshot: { ...result.options, datasetRevision: prepared.revision },
         matches: result.matches || [], votes: result.votes || { UP: 0, DOWN: 0 },
         averageSimilarity: result.averageSimilarity ?? null,
+        historical: result.historical || { wins: 0, losses: 0, draws: 0, unknown: 0, winRate: null },
         queryCandles: queryWindow, algorithmVersion: 'shape-v1'
       });
       this._lastScanned.set(key, fingerprint);
