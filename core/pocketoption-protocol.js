@@ -80,9 +80,9 @@ function normalizeHistoryCandles(eventName, payload, options = {}) {
     });
   }
   candles.sort((a, b) => a.startAt - b.startAt);
-  if (candles.length > 300) {
-    skippedRows += candles.length - 300;
-    candles.splice(0, candles.length - 300);
+  if (candles.length > 1000) {
+    skippedRows += candles.length - 1000;
+    candles.splice(0, candles.length - 1000);
   }
   return { asset: data.asset, timeframe, candles, skippedRows };
 }
