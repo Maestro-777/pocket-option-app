@@ -535,6 +535,8 @@ async function runFullCheck(source) {
     checks.push({ name: 'Баланс и режим', ok: !!lastBalance && Date.now() - lastBalance.ts < 15000, detail: lastBalance ? lastBalance.accountType.toUpperCase() + ' / ' + Math.round((Date.now() - lastBalance.ts) / 1000) + ' сек. назад' : 'Нет подтверждённых данных адаптера' });
     const bridge = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true).catch(() => null);
     checks.push({ name: 'Адаптер Pocket Option', ok: !!bridge, detail: bridge ? 'Активен' : 'Не обнаружен' });
+    const captureReady = marketCapture.status === 'listening';
+    checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketCapture.lastError || marketCapture.status) });
   } else checks.push({ name: 'Окно сайта', ok: true, detail: 'Не запускалось — это допустимо' });
   if (moduleManager) {
     const moduleChecks = await moduleManager.healthChecks();
