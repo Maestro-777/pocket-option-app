@@ -11,8 +11,12 @@
 - [x] Developer Guide и User Guide.
 - [x] pocket-tracker 3.6.0_0/manifest.json и ARCHITECTURE.md.
 
-### Подтверждено
-Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса, модульный менеджер и описанный механизм WebSocket/DOM расширения.
+### Подтверждено чтением и unit-тестами
+- [x] Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса и модульный менеджер.
+- [x] По исходникам 3.6.0 установлено: бинарные Socket.IO payload декодируются как UTF-8 JSON; updateStream/quotes/stream несут тики, в том числе нескольких активов.
+- [x] Локально на Node.js 22.16.0: `node --test` — 25 тестов пройдены, 0 ошибок (временная локальная копия исходников).
+- [x] Unit-тесты CandleSeries, MarketDataHub, Socket.IO decoder и CDP capture adapter с mock debugger.
+- [x] Тесты покрывают таймфреймы, OHLC, поздние тики, ограничение памяти, pre-entry окно, изоляцию сокетов и обработку malformed frames.
 
 ### Не запускалось или не подтверждено
 - [ ] npm install.
@@ -21,7 +25,8 @@
 - [ ] npm run pack / npm run dist.
 - [ ] запуск на Windows 11 x64.
 - [ ] интеграция с текущим Pocket Option.
-- [ ] end-to-end рыночные данные.
+- [ ] end-to-end рыночные данные на живом Pocket Option.
+- [ ] Проверка CDP capture на Windows Electron 45.3.4.
 - [ ] DEMO сделки.
 - [ ] REAL сделки.
 
