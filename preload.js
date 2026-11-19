@@ -27,6 +27,7 @@ const api = {
   getAnalysisConfig: () => ipcRenderer.invoke('app:analysis:get-config'),
   setAnalysisConfig: config => ipcRenderer.invoke('app:analysis:set-config', config || {}),
   scanNow: () => ipcRenderer.invoke('app:analysis:scan-now'),
+  getRecentDecisions: () => ipcRenderer.invoke('app:analysis:get-recent'),
   onStatus: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:status', h); return () => ipcRenderer.removeListener('app:status', h); },
   onLog: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:log', h); return () => ipcRenderer.removeListener('app:log', h); },
   onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); },
