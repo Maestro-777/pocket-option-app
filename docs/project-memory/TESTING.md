@@ -33,7 +33,8 @@
 - [x] npm install.
 - [x] npm run check.
 - [x] npm test — 22 теста завершились успешно.
-- [ ] npm run dist — Windows NSIS x64 build выполняется на момент последнего просмотра.
+- [x] npm run dist — Windows NSIS x64 installer и blockmap собраны успешно: dist/Pocket-Option-Background-Setup-0.1.1.exe.
+- [x] Подтверждено: code signing пропущен, сертификат не настроен.
 
 ## Не проверено в реальном окружении
 
