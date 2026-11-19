@@ -38,3 +38,11 @@ test('skips close-only rows, unsupported periods, future bars and unrelated even
   assert.equal(normalizeHistoryCandles('loadHistoryPeriod', { asset: 'EURUSD_otc', period: 7, history: [] }).timeframe, null);
   assert.equal(normalizeHistoryCandles('unrelated', {}).candles.length, 0);
 });
+
+test('limits passive history ingestion to the 300-bar rolling cache', () => {
+  const history = Array.from({ length: 400 }, (_, i) => [1700000000 + i * 5, 1.1, 1.3, 1.0, 1.2]);
+  const result = normalizeHistoryCandles('updateHistoryNewFast', { asset: 'EURUSD_otc', period: 5, history });
+  assert.equal(result.candles.length, 300);
+  assert.equal(result.skippedRows, 100);
+  assert.equal(result.candles[0].startAt, Math.floor((1700000000 + 100 * 5) * 1000 / 5000) * 5000);
+});
