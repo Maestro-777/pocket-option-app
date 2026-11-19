@@ -125,14 +125,14 @@ function readExpiration(){
  const display=document.querySelector('.block--expiration-inputs .value__val')||document.querySelector('.block--expiration-inputs .control__value .value__val');
  if(display){const seconds=expirationSecondsFromText(display.textContent);if(seconds!=null)return seconds;}
  const active=document.querySelector('.dops__timeframes-item--active, .dops__timeframes-item.active');
- if(active){const seconds=expirationSecondsFromText(active.textContent);if(seconds!=null)return seconds;}
+ if(active){const seconds=expirationSecondsFromText(active.textContent);if(seconds!=null)return seconds;const key=String(active.textContent||'').trim().toUpperCase();const map={S5:5,S10:10,S15:15,S30:30,M1:60,M2:120,M3:180,M5:300,M10:600,M15:900};if(map[key]!=null)return map[key];}
  return null;
 }
 function expirationLabels(seconds){
  const h=Math.floor(seconds/3600),m=Math.floor((seconds%3600)/60),s=seconds%60;
  const clock=[h,m,s].map((x,i)=>i===0?String(x).padStart(2,'0'):String(x).padStart(2,'0')).join(':');
  const minuteClock=[m,s].map(x=>String(x).padStart(2,'0')).join(':');
- return new Set([String(seconds),String(seconds)+'S','S'+seconds,clock,minuteClock]);
+ const named=({5:['S5','5S'],10:['S10','10S'],15:['S15','15S'],30:['S30','30S'],60:['M1','1M'],120:['M2','2M'],180:['M3','3M'],300:['M5','5M'],600:['M10','10M'],900:['M15','15M']})[seconds]||[];return new Set([String(seconds),String(seconds)+'S','S'+seconds,clock,minuteClock,...named]);
 }
 function openExpirationDropdown(){
  const selectors=['.block--expiration-inputs .control__value.value','.block--expiration-inputs .control__value','.block--expiration-inputs .value__val','.block--expiration-inputs'];
