@@ -80,6 +80,10 @@ function normalizeHistoryCandles(eventName, payload, options = {}) {
     });
   }
   candles.sort((a, b) => a.startAt - b.startAt);
+  if (candles.length > 300) {
+    skippedRows += candles.length - 300;
+    candles.splice(0, candles.length - 300);
+  }
   return { asset: data.asset, timeframe, candles, skippedRows };
 }
 
