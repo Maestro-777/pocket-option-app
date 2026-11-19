@@ -2,7 +2,7 @@
 
 const { ipcRenderer } = require('electron');
 
-if (!window.__PT_PO_PRELOAD_BRIDGE_INSTALLED__) {
+if (window.top === window && !window.__PT_PO_PRELOAD_BRIDGE_INSTALLED__) {
   window.__PT_PO_PRELOAD_BRIDGE_INSTALLED__ = true;
 
   const visible = element => {
