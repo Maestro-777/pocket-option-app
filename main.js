@@ -176,7 +176,8 @@ async function injectMarketDataBridge(win) {
   const debuggerApi = win.webContents.debugger;
   try {
     if (!debuggerApi.isAttached()) debuggerApi.attach('1.3');
-    const source = fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
+    const captureMode = !!(marketDataCapture && marketDataCapture.attached);
+    const source = (captureMode ? 'window.__PT_CAPTURE_MODE__ = true;\\n' : '') + fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
     await debuggerApi.sendCommand('Page.enable');
     await debuggerApi.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
     log('info', 'Перехват рыночных данных установлен до запуска скриптов сайта');
@@ -185,6 +186,19 @@ async function injectMarketDataBridge(win) {
     log('error', 'Не удалось установить перехват рыночных данных', String(error));
     return false;
   }
+}
+async function attachMarketDataCapture(win) {
+  const sink = {
+    ingest: tick => ({ accepted: marketDataService.ingestTicks([{ asset: tick.asset, rawSymbol: tick.rawSymbol, ts: tick.ts, price: tick.price }]) > 0 }),
+    ingestAssets: payload => marketDataService.ingestAssets(payload)
+  };
+  marketDataCapture = new MarketDataCapture({
+    debuggerApi: win.webContents.debugger, marketDataHub: sink, log,
+    onStatus: () => publishMarketDataStatus()
+  });
+  const attached = await marketDataCapture.attach();
+  if (!attached) log('warn', 'CDP market capture недоступен; используется page-bridge fallback', marketDataCapture.getStatus());
+  return attached;
 }
 function injectSiteBridge(win) {
   try {
@@ -207,6 +221,9 @@ async function launchSite() {
     }
   });
   siteWindow.webContents.setBackgroundThrottling(false);
+  await attachMarketDataCapture(siteWindow);
+  await injectMarketDataBridge(siteWindow);
+  if (!siteWindow || siteWindow.isDestroyed()) return;
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
     injectSiteBridge(siteWindow); publishStatus();
@@ -225,14 +242,12 @@ async function launchSite() {
   });
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
-  siteWindow.on('closed', () => { siteWindow = null; refreshTrayMenu(); publishStatus(); });
+  siteWindow.on('closed', () => { if (marketDataCapture) marketDataCapture.close(); marketDataCapture = null; siteWindow = null; refreshTrayMenu(); publishStatus(); });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) { shell.openExternal(url); }
     return { action: 'deny' };
   });
   selectedAccount = 'DEMO';
-  await injectMarketDataBridge(siteWindow);
-  if (!siteWindow || siteWindow.isDestroyed()) return;
   siteWindow.loadURL(ACCOUNT_URLS.DEMO).catch(error => log('error', 'Не удалось открыть Pocket Option', String(error)));
   log('info', 'Пользователь запустил Pocket Option');
   refreshTrayMenu(); publishStatus();
@@ -254,7 +269,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
+    reconnectAttempts, update: updateState, marketData: { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null }, signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
   };
 }
 function publishStatus() {
@@ -351,8 +366,8 @@ function publishMarketDataStatus() {
   if (marketDataPublishTimer || !mainWindow || mainWindow.isDestroyed()) return;
   marketDataPublishTimer = setTimeout(() => {
     marketDataPublishTimer = null;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:market-data', marketDataService.getStatus());
-    if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:market-data', marketDataService.getStatus());
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:market-data', { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null });
+    if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:market-data', { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null });
     publishStatus();
   }, 1000);
 }
