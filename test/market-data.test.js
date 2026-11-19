@@ -33,3 +33,5 @@ test('enforces a global tick memory ceiling across assets',()=>{
 });
 
 test('retains raw platform symbol identifiers for later asset switching',()=>{const service=new MarketDataService();service.ingestAssets([{symbol:'EURUSD_otc',name:'EUR/USD OTC'}]);const asset=service.listAssets({otcOnly:true})[0];assert.equal(asset.symbol,'EURUSD_OTC');assert.equal(asset.rawSymbol,'EURUSD_otc');});
+
+test('keeps canonical OTC identity when the raw platform symbol omits the OTC suffix',()=>{const service=new MarketDataService();service.ingestAssets([{symbol:'EURUSD',name:'EUR/USD OTC'}]);service.ingestTicks([{asset:'EURUSD_OTC',rawSymbol:'EURUSD',timestamp:1700000000000,price:1.1}]);const asset=service.listAssets({otcOnly:true})[0];assert.equal(asset.symbol,'EURUSD_OTC');assert.equal(asset.rawSymbol,'EURUSD');});
