@@ -62,3 +62,8 @@ textarea{resize:vertical}
 .analysis-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
 .analysis-options label{font-size:11px}
 .analysis-options input{width:100%;padding:7px 8px}
+
+.decision-journal{display:flex;flex-direction:column;gap:7px;max-height:36vh;overflow:auto}
+.decision-entry{background:#0e1728;border:1px solid #263650;border-radius:7px;padding:8px}
+.decision-entry summary{cursor:pointer;font-size:11px;font-weight:650;color:#d7e2f3}
+.decision-entry pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#9fb1cc;font-size:10px;max-height:320px;overflow:auto;margin:8px 0 0}
