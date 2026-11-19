@@ -9,12 +9,14 @@
 - [ ] Подтвердить полный запуск и Windows x64 installer на целевой машине.
 
 ## Этап 1. Рыночные данные — код реализован, runtime частично не подтверждён
-- [x] WebSocket bridge для updateAssets/updateStream/history и Socket.IO JSON/binary.
+- [x] CDP Network capture для нескольких WebSocket соединений, Socket.IO JSON/binary и per-socket attachment state.
+- [x] OTC AssetCatalog с неоднозначностью aliases и raw platform symbols.
+- [x] Page bridge fallback для history/close events и торговой команды.
 - [x] Каталог OTC активов с сохранением исходного raw symbol.
 - [x] Раздельная агрегация OHLC для S5, S10, S15, S30, M1, M2, M3, M5, M10, M15.
 - [x] Ограниченные буферы и snapshot persistence/restore.
 - [x] Fail-closed разбор исторических payload.
-- [ ] Подтвердить реальный одновременный поток всех OTC-пар.
+- [ ] Подтвердить реальный одновременный поток всех OTC-пар на живой сессии (CDP unit tests уже проходят).
 - [ ] Проверить задержки, пропуски, reconnect и полноту каталога на живой сессии.
 - [ ] Проверить получение истории для всех пар/таймфреймов.
 
