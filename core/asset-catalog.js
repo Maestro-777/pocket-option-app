@@ -28,6 +28,7 @@ class AssetCatalog {
     this._entries = new Map();
     this._byBase = new Map();
     this.stats = { rowsSeen: 0, entriesAccepted: 0, rowsIgnored: 0 };
+    this.revision = 0;
   }
 
   ingest(payload) {
@@ -52,7 +53,41 @@ class AssetCatalog {
     }
     this.stats.entriesAccepted += accepted;
     this.stats.rowsIgnored += ignored;
+    if (accepted > 0) this.revision++;
     return { accepted, ignored, total: this._entries.size, otc: this.listOTC().length };
+  }
+
+  restore(entries) {
+    if (!Array.isArray(entries)) throw new TypeError('entries должен быть массивом');
+    let restored = 0;
+    for (const source of entries) {
+      if (!source || typeof source !== 'object') continue;
+      const asset = normalizeAsset(source.asset, source.isOTC === true);
+      if (!asset || asset !== String(source.asset).toUpperCase()) continue;
+      const rawSymbol = String(source.rawSymbol || asset), label = String(source.label || rawSymbol);
+      const isOTC = asset.endsWith('_OTC');
+      if (source.isOTC !== isOTC) continue;
+      const base = asset.replace(/_OTC$/, '');
+      this._entries.set(asset, { asset, rawSymbol, label, isOTC, source: 'database' });
+      if (!this._byBase.has(base)) this._byBase.set(base, new Set());
+      this._byBase.get(base).add(asset);
+      restored++;
+    }
+    return restored;
+  }
+
+  rememberExplicitOtc(rawAsset) {
+    const raw = String(rawAsset || '').trim(), asset = normalizeAsset(raw);
+    if (!asset || !asset.endsWith('_OTC')) return null;
+    const existing = this._entries.get(asset);
+    if (existing) return { ...existing };
+    const entry = { asset, rawSymbol: raw, label: raw, isOTC: true, source: 'explicit-otc-suffix' };
+    this._entries.set(asset, entry);
+    const base = asset.replace(/_OTC$/, '');
+    if (!this._byBase.has(base)) this._byBase.set(base, new Set());
+    this._byBase.get(base).add(asset);
+    this.revision++;
+    return { ...entry };
   }
 
   resolve(rawAsset) {
