@@ -41,6 +41,8 @@ test('excludes a forming candle unless explicitly requested', () => {
   const partial = aggregateTicksToCandles(ticks, 'S5', { asOf: 9999, includeIncomplete: true });
   assert.equal(partial.length, 1);
   assert.equal(partial[0].complete, false);
+  const bounded = aggregateTicksToCandles([...ticks, { asset: 'EURUSD_OTC', ts: 15000, price: 9 }], 'S5', { asOf: 9999, includeIncomplete: true });
+  assert.equal(bounded[0].close, 1.3);
 });
 
 test('ignores malformed ticks and rejects invalid clock inputs', () => {
