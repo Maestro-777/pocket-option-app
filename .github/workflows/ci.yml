@@ -39,3 +39,11 @@ jobs:
 
       - name: Build Windows installer
         run: npm run dist
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-option-windows-installer-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
