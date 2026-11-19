@@ -17,8 +17,8 @@ class TradeLedger{
   let data;try{data=JSON.parse(await fs.readFile(this.filePath,'utf8'));}catch(error){if(error.code==='ENOENT')return this.getStatus();throw error;}
   if(!data||data.schemaVersion!==1||!Array.isArray(data.records)||!Array.isArray(data.unmatched))throw new TypeError('Неизвестный формат журнала сделок');
   if(data.records.length>MAX_RECORDS||data.unmatched.length>MAX_UNMATCHED)throw new RangeError('Журнал сделок превышает допустимый размер');
-  this.records.clear();for(const raw of data.records){const record=validateRecord(raw);if(this.records.has(record.tradeId))throw new Error('Повторяющийся tradeId в журнале');this.records.set(record.tradeId,record);}
-  this.unmatched=data.unmatched.slice(-MAX_UNMATCHED);return this.getStatus();
+  this.records.clear();let recovered=false;for(const raw of data.records){const record=validateRecord(raw);if(this.records.has(record.tradeId))throw new Error('Повторяющийся tradeId в журнале');if(record.status==='PREPARING'||record.status==='SUBMITTED_UNCONFIRMED'){record.status='UNKNOWN_AFTER_RESTART';recovered=true;}this.records.set(record.tradeId,record);}
+  this.unmatched=data.unmatched.slice(-MAX_UNMATCHED);if(recovered)await this._write();return this.getStatus();
  }
  _serialize(task){const next=this.queue.then(task);this.queue=next.catch(()=>{});return next;}
  async _write(){
