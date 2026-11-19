@@ -148,6 +148,9 @@
   async function editExample(id) {
     const ex = examples.find(x => x.id === id);
     if (!ex) return;
+    if (!Array.from($('annotation-pair').options).some(o => o.value === ex.pair)) {
+      const option = document.createElement('option'); option.value = ex.pair; option.textContent = ex.pair; $('annotation-pair').appendChild(option);
+    }
     $('annotation-pair').value = ex.pair;
     $('annotation-timeframe').value = ex.timeframe;
     await loadCandles();
@@ -245,7 +248,7 @@
     await refreshExamples();
   });
   api.onMarketData(() => {
-    if ($('page-annotation').classList.contains('active') && !$('annotation-pair').options.length) loadAssets();
+    if ($('page-annotation').classList.contains('active') && !selectedAsset()) loadAssets();
   });
   loadAssets().catch(() => {});
 })();
