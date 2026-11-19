@@ -23,8 +23,8 @@ const FULL_CHECK_INTERVAL = 5 * 60_000;
 
 let mainWindow = null;
 let siteWindow = null;
-let labelerWindow = null;
 let miniWindow = null;
+let labelerWindow = null;
 let tray = null;
 let quitting = false;
 let recoveryInProgress = false;
@@ -370,6 +370,7 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (healthTimer) clearInterval(healthTimer);
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
+  marketPersistenceTimer = setInterval(persistMarketDataSafely, 1000);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   if (settings.showMiniWidget) createMiniWindow().show();
   else if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
@@ -436,7 +437,10 @@ ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => 
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
   const symbol = String(asset || '').trim().toUpperCase();
   if (!symbol.endsWith('_OTC')) throw new TypeError('Разметка разрешена только для OTC-активов');
-  return marketDataStore.getCandles(symbol, timeframe, { limit: Math.min(300, Math.max(1, Number(options?.limit) || 300)), fromAt: options?.fromAt, toAt: options?.toAt });
+  return marketDataStore.getCandles(symbol, timeframe, {
+    limit: Math.min(300, Math.max(1, Number(options?.limit) || 300)),
+    fromAt: options?.fromAt, toAt: options?.toAt
+  });
 });
 ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
@@ -636,3 +640,9 @@ else app.whenReady().then(async () => {
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
   if (settings.showMiniWidget) createMiniWindow().show();
+  healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
+  fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
+  runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
+  configureUpdateChecks();
+}).catch(error => { console.error(error); app.quit(); });
