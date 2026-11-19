@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { analyzeSimilarity, prepareExamples, validateOptions } = require('./similarity-engine');
 const { TIMEFRAME_MS } = require('./timeframes');
+const { rankSignals } = require('./signal-ranking');
 
 class DecisionScanner {
   constructor(options = {}) {
@@ -23,6 +24,7 @@ class DecisionScanner {
     this._examples = new Map();
     this._lastScanned = new Map();
     this._restoredKeys = new Set();
+    this._latestSignals = new Map();
     this.stats = { decisions: 0, signals: 0, noSignals: 0, errors: 0, skipped: 0, lastScanAt: null };
   }
 
@@ -157,6 +159,8 @@ class DecisionScanner {
         queryCandles: queryWindow, algorithmVersion: 'shape-v1'
       });
       this._lastScanned.set(key, fingerprint);
+      if (saved.status === 'SIGNAL') this._latestSignals.set(key, { ...saved, historical: result.historical || null });
+      else this._latestSignals.delete(key);
       this.stats.decisions++;
       if (saved.status === 'SIGNAL') this.stats.signals++;
       else this.stats.noSignals++;
@@ -194,6 +198,10 @@ class DecisionScanner {
     return {
       running: !this._closed, pendingAssets: this._queue.size,
       selectedTimeframes: this._selectedTimeframes(this.getSettings()),
+      rankedSignals: rankSignals([...this._latestSignals.values()].filter(item => {
+        const duration = TIMEFRAME_MS[String(item.timeframe || '').toUpperCase()];
+        return duration && Number.isSafeInteger(item.decisionAt) && Date.now() - item.decisionAt < duration;
+      })),
       ...this.stats
     };
   }
@@ -204,6 +212,7 @@ class DecisionScanner {
     this._timer = null;
     this._queue.clear();
     this._examples.clear();
+    this._latestSignals.clear();
   }
 }
 
