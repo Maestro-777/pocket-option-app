@@ -54,7 +54,8 @@ function renderStatus(status) {
     $('update-version').textContent = status.update.version || status.appVersion;
     $('update-message').textContent = status.update.message || '';
     $('update-progress').style.width = (status.update.progress || 0) + '%';
-    $('download-update').disabled = status.update.status !== 'available' || status.update.status === 'downloading';
+    $('download-update').disabled = status.update.status !== 'available';
+    $('download-update').textContent = status.update.status === 'downloading' ? 'Загрузка…' : 'Скачать';
     $('install-update').disabled = status.update.status !== 'downloaded';
     if (status.update.version) $('update-version').textContent = status.update.version;
   }
