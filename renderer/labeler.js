@@ -365,6 +365,16 @@ async function loadExamples() {
   }
 }
 
+function readAnalysisOptions() {
+  return {
+    topK: Number($('analysis-topk').value),
+    minSimilarity: Number($('analysis-threshold').value),
+    minExamples: Number($('analysis-min-examples').value),
+    minDirectionVotes: Number($('analysis-min-votes').value),
+    lookback: Number($('analysis-lookback').value)
+  };
+}
+
 function renderAnalysis(result) {
   const summary = $('analysis-summary');
   const list = $('analysis-matches');
@@ -415,7 +425,7 @@ async function runSimilarityAnalysis() {
   button.disabled = true;
   button.textContent = 'Анализ…';
   try {
-    const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), {});
+    const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), readAnalysisOptions());
     renderAnalysis(result);
     setStatus(result.status === 'SIGNAL' ? 'Найдено направление: ' + (result.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : 'Совпадения проверены: сигнала нет');
   } catch (error) {
@@ -434,7 +444,7 @@ async function runSimilarityBacktest() {
   button.disabled = true;
   button.textContent = 'Проверка…';
   try {
-    const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), {});
+    const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), readAnalysisOptions());
     const accuracy = report.accuracy == null ? 'недостаточно сигналов' : report.accuracy.toFixed(2) + '%';
     $('backtest-summary').textContent =
       'Период: ' + report.timeframe +
