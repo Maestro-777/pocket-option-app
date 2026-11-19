@@ -89,8 +89,9 @@ class MarketDataCapture {
     this.lastFrameAt = Date.now();
     const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
     if (decoded?.eventName === 'updateAssets') {
-      const catalogResult = this.assetCatalog.ingest(decoded.payload);
-      if (typeof this.marketDataHub.ingestAssets === 'function') this.marketDataHub.ingestAssets(decoded.payload);
+      let catalogResult;
+      try { catalogResult = this.assetCatalog.ingest(decoded.payload); if (typeof this.marketDataHub.ingestAssets === 'function') this.marketDataHub.ingestAssets(decoded.payload); }
+      catch (error) { this.lastError = String(error?.message || error); this.log('error', 'Не удалось обработать каталог активов', this.lastError); this._notify(); return; }
       this.log('info', 'Получен каталог активов Pocket Option', catalogResult);
       this._notify();
       return;
@@ -102,8 +103,10 @@ class MarketDataCapture {
       if (asset.ambiguous) { this.rejectedTicks++; this.rejectedAmbiguousAssets++; continue; }
       if (!asset.isOTC || !asset.asset) { this.rejectedTicks++; this.rejectedNonOtcAssets++; continue; }
       if (asset.source === 'explicit-otc-suffix') this.assetCatalog.rememberExplicitOtc(tick.asset);
-      const result = this.marketDataHub.ingest({ ...tick, asset: asset.asset, rawSymbol: asset.rawSymbol });
-      if (result.accepted) {
+      let result;
+      try { result = this.marketDataHub.ingest({ ...tick, asset: asset.asset, rawSymbol: asset.rawSymbol }); }
+      catch (error) { this.rejectedTicks++; this.lastError = String(error?.message || error); this.log('error', 'Ошибка передачи тика в MarketDataService', this.lastError); continue; }
+      if (result && result.accepted) {
         this.lastTickAt = tick.ts;
         this.lastTickReceivedAt = Date.now();
       } else this.rejectedTicks++;
