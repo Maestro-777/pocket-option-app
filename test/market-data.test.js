@@ -13,7 +13,8 @@ test('normalizes OTC symbols and keeps their suffix', () => {
 test('normalizes second and millisecond timestamps', () => {
   assert.equal(normalizeTimestamp(1_700_000_000, 1), 1_700_000_000_000);
   assert.equal(normalizeTimestamp(1_700_000_000_000, 1), 1_700_000_000_000);
-  assert.equal(normalizeTimestamp(-1, 1), 1);
+  assert.equal(normalizeTimestamp(-1, 1), null);
+  assert.equal(normalizeTimestamp(null, 1), 1);
 });
 
 test('parses multi-asset updateStream tuples', () => {
@@ -56,4 +57,22 @@ test('stores independent asset streams and deduplicates exact repeated ticks', (
 test('rejects malformed and unsupported payloads', () => {
   assert.equal(parseMarketEvent('trade/open', { asset: 'EURUSD', price: 1 }, Date.now()), null);
   assert.equal(parseMarketEvent('updateStream', [['EURUSD', 0, -2]], Date.now()), null);
+});
+
+test('parses provider OHLC history without borrowing the selected DOM symbol', () => {
+  const receivedAt = 1_700_000_120_000;
+  const event = parseMarketEvent('history/list/v2', {
+    asset: 'EURUSD_otc', period: 60,
+    history: [
+      [1_700_000_000, 1.10, 1.12, 1.09, 1.11],
+      [1_700_000_060, 1.11, 1.13, 1.10, 1.12]
+    ]
+  }, receivedAt);
+  assert.equal(event.kind, 'history');
+  assert.equal(event.candles.length, 2);
+  assert.equal(event.candles[0].asset, 'EURUSD_OTC');
+  assert.equal(event.candles[0].open, 1.10);
+  assert.equal(event.candles[0].high, 1.12);
+  assert.equal(event.candles[0].low, 1.09);
+  assert.equal(event.candles[0].close, 1.11);
 });
