@@ -49,3 +49,12 @@ test('validates configured open trade limits and current position count', () => 
   assert.throws(() => planTradeIntents([], { maxOpenTrades: 11 }), /от 1 до 10/);
   assert.throws(() => planTradeIntents([], { openTradeCount: -1 }), /неотрицательным/);
 });
+
+test('treats an opposite-direction revision on the same bar as the same signal slot', () => {
+  const up = signal('EURUSD_OTC', 'UP', 90);
+  const down = signal('EURUSD_OTC', 'DOWN', 91);
+  assert.equal(signalKey(up), signalKey(down));
+  const result = planTradeIntents([up, down], { tradingEnabled: true, maxOpenTrades: 2 });
+  assert.equal(result.selected.length, 1);
+  assert.equal(result.rejected[0].reason, 'duplicate_signal');
+});
