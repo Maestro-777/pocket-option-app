@@ -33,6 +33,7 @@ function validateCandle(candle) {
 class MarketDataStore {
   constructor(databasePath, options = {}) {
     if (typeof databasePath !== 'string' || !databasePath.trim()) throw new TypeError('databasePath обязателен');
+    if (options == null || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('options должен быть объектом');
     this.databasePath = databasePath;
     this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 1000 : Number(options.maxCandlesPerSeries);
     if (!Number.isInteger(this.maxCandlesPerSeries) || this.maxCandlesPerSeries < 1 || this.maxCandlesPerSeries > 100_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 100000');
