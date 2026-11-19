@@ -8,6 +8,8 @@ const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
 const { MarketDataHub } = require('./core/market-data');
+const { AssetCatalog } = require('./core/asset-catalog');
+const { MarketDataStore } = require('./core/market-data-store');
 const MarketDataCapture = require('./core/market-data-capture');
 
 const APP_NAME = 'Pocket Option Background';
@@ -41,7 +43,11 @@ let updateState = { status: 'idle', version: null, progress: 0, message: 'Про
 let moduleManager = null;
 let marketDataHub = null;
 let marketDataCapture = null;
+let marketDataStore = null;
 let marketStatusPublishTimer = null;
+let marketPersistenceTimer = null;
+let marketPersistenceError = null;
+let persistedCatalogRevision = -1;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -152,13 +158,50 @@ function scheduleMarketStatusPublish() {
 
 function attachMarketDataCapture(win) {
   marketDataHub = new MarketDataHub();
+  const assetCatalog = new AssetCatalog();
+  if (marketDataStore) {
+    try {
+      const restoredCatalog = assetCatalog.restore(marketDataStore.listCatalog({ otcOnly: true }));
+      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(1000));
+      persistedCatalogRevision = assetCatalog.revision;
+      log('info', 'Исторические рыночные данные восстановлены', { restoredCatalog, ...restored });
+    } catch (error) {
+      marketPersistenceError = String(error);
+      log('error', 'Не удалось восстановить рыночные данные из SQLite', marketPersistenceError);
+    }
+  }
   marketDataCapture = new MarketDataCapture({
     debuggerApi: win.webContents.debugger,
     marketDataHub,
+    assetCatalog,
     log,
     onStatus: scheduleMarketStatusPublish
   });
   marketDataCapture.attach().catch(error => log('error', 'Ошибка запуска захвата рыночных данных', String(error)));
+}
+
+function persistMarketDataSafely() {
+  if (!marketDataStore || !marketDataHub) return;
+  try {
+    const pending = marketDataHub.getDirtyCompletedCandles(Date.now());
+    if (pending.length) {
+      marketDataStore.upsertCandles(pending.map(item => item.candle));
+      marketDataHub.acknowledgePersisted(pending);
+    }
+    const catalog = marketDataCapture?.assetCatalog;
+    if (catalog && catalog.revision !== persistedCatalogRevision) {
+      marketDataStore.upsertCatalog(catalog.listAll());
+      persistedCatalogRevision = catalog.revision;
+    }
+    if (marketPersistenceError) {
+      marketPersistenceError = null;
+      log('info', 'Сохранение рыночных данных восстановлено');
+    }
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (message !== marketPersistenceError) log('error', 'Ошибка сохранения рыночных данных', message);
+    marketPersistenceError = message;
+  }
 }
 
 function getMarketDataStatus() {
@@ -168,7 +211,12 @@ function getMarketDataStatus() {
       lastTickAt: null, lastTickReceivedAt: null, lastError: null, rejectedTicks: 0,
       protocol: { textFrames: 0, binaryFrames: 0, malformedFrames: 0, events: 0, ticks: 0 }
     },
-    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0 }
+    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0, dirtyCandles: 0 },
+    persistence: {
+      available: !!marketDataStore,
+      error: marketPersistenceError,
+      database: marketDataStore ? marketDataStore.getStats() : null
+    }
   };
 }
 
@@ -208,8 +256,10 @@ function launchSite() {
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('closed', () => {
     if (marketDataCapture) marketDataCapture.close();
+    persistMarketDataSafely();
     marketDataCapture = null;
     marketDataHub = null;
+    persistedCatalogRevision = -1;
     siteWindow = null; refreshTrayMenu(); publishStatus();
   });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -278,6 +328,7 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (healthTimer) clearInterval(healthTimer);
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
+  marketPersistenceTimer = setInterval(persistMarketDataSafely, 1000);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   if (settings.showMiniWidget) createMiniWindow().show();
   else if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
@@ -464,6 +515,7 @@ async function runFullCheck(source) {
     checks.push({ name: 'Баланс и режим', ok: !!lastBalance && Date.now() - lastBalance.ts < 15000, detail: lastBalance ? lastBalance.accountType.toUpperCase() + ' / ' + Math.round((Date.now() - lastBalance.ts) / 1000) + ' сек. назад' : 'Нет подтверждённых данных адаптера' });
     const bridge = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true).catch(() => null);
     checks.push({ name: 'Адаптер Pocket Option', ok: !!bridge, detail: bridge ? 'Активен' : 'Не обнаружен' });
+    checks.push({ name: 'Хранилище рыночных данных', ok: !!marketDataStore && !marketPersistenceError, detail: marketDataStore ? (marketPersistenceError || 'SQLite доступна; свечей: ' + marketDataStore.getStats().candles) : 'SQLite недоступна' });
     const captureReady = marketDataCapture?.status === 'listening';
     checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketDataCapture?.lastError || marketDataCapture?.status || 'stopped') });
   } else checks.push({ name: 'Окно сайта', ok: true, detail: 'Не запускалось — это допустимо' });
@@ -481,7 +533,10 @@ async function runFullCheck(source) {
 app.on('before-quit', () => {
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
   if (marketStatusPublishTimer) clearTimeout(marketStatusPublishTimer);
+  if (marketPersistenceTimer) clearInterval(marketPersistenceTimer);
   if (marketDataCapture) marketDataCapture.close();
+  persistMarketDataSafely();
+  if (marketDataStore) { try { marketDataStore.close(); } catch (error) { log('error', 'Не удалось закрыть SQLite хранилище', String(error)); } marketDataStore = null; }
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
@@ -492,6 +547,13 @@ const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
+  try {
+    marketDataStore = new MarketDataStore(path.join(userRoot(), 'market-data.sqlite'));
+    log('info', 'SQLite хранилище рыночных данных открыто', marketDataStore.getStats());
+  } catch (error) {
+    marketPersistenceError = String(error?.message || error);
+    log('error', 'SQLite хранилище рыночных данных недоступно', marketPersistenceError);
+  }
   loadSettings(); createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
