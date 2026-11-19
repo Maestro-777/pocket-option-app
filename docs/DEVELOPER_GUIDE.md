@@ -14,7 +14,7 @@ Pocket Option Background — отдельное Electron-приложение. �
 
 1. **Main process (`main.js`)** — окна, жизненный цикл, трей, настройки, журналы, мониторинг, восстановление, обновления и IPC.
 2. **Renderer processes (`renderer/`)** — пользовательская панель и мини-виджет. Node.js API напрямую им не предоставляется.
-3. **Интеграция сайта (`site-preload.js`, `site-bridge.js`, `market-data-bridge.js`)** — отдельные ограниченные мосты для баланса, рыночных данных, закрытых сделок и проверенной команды DEMO-исполнения.
+3. **Интеграция сайта** — `site-preload.js`/`site-bridge.js` для баланса и DOM; `market-data-bridge.js` для changeSymbol, DEMO-команды, истории/close fallback; основной market-data capture выполняется через CDP в `core/market-data-capture.js`.
 4. **Core (`core/`)** — свечи, matcher, example store, signal scheduler, журнал решений, торговый gate, DEMO executor и постоянный trade ledger.
 
 Обмен между renderer и main организован через `preload.js` и `contextBridge`.
@@ -22,19 +22,38 @@ Pocket Option Background — отдельное Electron-приложение. �
 ## 2. Структура каталогов
 
 ```text
-Pocket-Option-Background/
+pocket-option-app/
 ├── package.json
 ├── README.md
 ├── main.js
 ├── preload.js
 ├── site-preload.js
 ├── site-bridge.js
+├── market-data-bridge.js
+├── core/
+│   ├── asset-catalog.js
+│   ├── pocketoption-protocol.js
+│   ├── market-data-capture.js
+│   ├── timeframes.js
+│   ├── market-data.js
+│   ├── market-data-store.js
+│   ├── patterns.js
+│   ├── example-store.js
+│   ├── matcher.js
+│   ├── signal-scheduler.js
+│   ├── decision-journal.js
+│   ├── trading-gate.js
+│   ├── trade-execution.js
+│   ├── trade-ledger.js
+│   └── scan-state-store.js
 ├── renderer/
 │   ├── index.html
 │   ├── styles.css
 │   ├── app.js
+│   ├── annotation.js
 │   ├── widget.html
 │   └── widget.js
+├── docs/project-memory/
 └── modules/
     ├── manager.js
     ├── README.md
