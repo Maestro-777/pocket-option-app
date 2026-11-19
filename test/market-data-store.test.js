@@ -213,6 +213,7 @@ test('stores immutable decision snapshots and filters the analysis journal', () 
     paramsSnapshot: { topK: 10, minSimilarity: 80, minExamples: 3, minDirectionVotes: 6, lookback: 30 },
     matches: [{ id: 'sample-001', asset: 'GBPUSD_OTC', direction: 'UP', similarity: 91.2, outcome: 'WIN' }],
     votes: { UP: 6, DOWN: 2 }, averageSimilarity: 89.5,
+    historical: { wins: 7, losses: 2, draws: 1, unknown: 0, winRate: 77.78 },
     queryCandles: [candle({ startAt: 5000, endAt: 10000 })],
     algorithmVersion: 'shape-v1'
   };
@@ -221,6 +222,7 @@ test('stores immutable decision snapshots and filters the analysis journal', () 
   assert.deepEqual(saved.paramsSnapshot, decision.paramsSnapshot);
   assert.deepEqual(saved.matches, decision.matches);
   assert.deepEqual(saved.votes, decision.votes);
+  assert.deepEqual(saved.historical, decision.historical);
   assert.equal(saved.queryCandles.length, 1);
   assert.equal(store.getStats().analysisDecisions, 1);
   assert.equal(store.listAnalysisDecisions({ asset: 'EURUSD_OTC', timeframe: 'S5' }).length, 1);
