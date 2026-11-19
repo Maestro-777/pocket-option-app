@@ -181,7 +181,7 @@ class MarketDataHub {
     for (const byTimeframe of this._assets.values()) {
       for (const series of byTimeframe.values()) { seriesCount++; candleCount += series.size; }
     }
-    return { ok: true, assets: this._assets.size, timeframes: [...this.timeframes], series: seriesCount, candlesInMemory: candleCount, ...this.stats };
+    return { ok: true, assets: this._assets.size, timeframes: [...this.timeframes], series: seriesCount, candlesInMemory: candleCount, dirtyCandles: this._dirty.size, ...this.stats };
   }
 }
 
