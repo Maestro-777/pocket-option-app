@@ -295,7 +295,7 @@ ipcMain.handle('app:account:switch', async (_event, target) => {
     });
     if (answer.response !== 1) return { ok: false, cancelled: true };
   }
-  if (mode === 'REAL' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); saveSettings(); log('warn', 'Автоторговля выключена перед переходом на REAL'); }
+  if (mode === 'REAL' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); saveSettings(); log('warn', 'Автоторговля выключена перед переходом на REAL'); }
   log('warn', 'Запрошено переключение счёта', { from: selectedAccount, to: mode });
   try {
     await siteWindow.loadURL(ACCOUNT_URLS[mode]);
@@ -450,7 +450,7 @@ ipcMain.handle('app:trading:get-state', event => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   return { ok: true, enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, config: { baseBet: settings.baseBet, defaultExpirySeconds: settings.defaultExpirySeconds }, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null, account: { selected: selectedAccount, detected: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }, stats: tradeLedger.getStats(), openTrades: tradeLedger.listOpen() };
 });
-ipcMain.handle('app:trading:set-enabled', (event, enabled) => {
+ipcMain.handle('app:trading:set-enabled', async (event, enabled) => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   if (enabled !== true && enabled !== false) return { ok: false, reason: 'invalid_enabled_value' };
   if (enabled) {
@@ -459,18 +459,18 @@ ipcMain.handle('app:trading:set-enabled', (event, enabled) => {
     if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_account_not_verified' };
     if (tradeLedger.listOpen().length >= Number(settings.analysisConfig && settings.analysisConfig.maxOpenTrades || 1)) return { ok: false, reason: 'open_trade_limit_reached_or_unresolved_trades' };
     settings.autoTradingEnabled = true; tradingGate.setPaused(false);
-  } else { settings.autoTradingEnabled = false; tradingGate.setPaused(true); }
+  } else { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); }
   saveSettings(); publishStatus();
   return { ok: true, enabled: settings.autoTradingEnabled, gate: tradingGate.getState() };
 });
-ipcMain.handle('app:trading:set-paused', (event, paused) => {
+ipcMain.handle('app:trading:set-paused', async (event, paused) => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   if (typeof paused !== 'boolean') return { ok: false, reason: 'invalid_paused_value' };
   if (!paused) {
     const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
     if (settings.autoTradingEnabled !== true || selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_auto_trading_not_armed' };
   }
-  tradingGate.setPaused(paused); publishStatus();
+  tradingGate.setPaused(paused); if (paused && tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); publishStatus();
   return { ok: true, gate: tradingGate.getState() };
 });
 ipcMain.handle('app:trading:set-config', (event, config = {}) => {
@@ -498,7 +498,7 @@ ipcMain.on('site:balance', (event, payload) => {
   if (payload.ts && payload.ts < (lastBalance?.ts || 0)) return;
   lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
   lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase();
-  if (payload.accountType !== 'demo' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); saveSettings(); log('warn', 'Автоторговля автоматически отключена: обнаружен не-DEMO счёт'); }
+  if (payload.accountType !== 'demo' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) tradeExecutionAdapter.cancelInFlight().catch(error => log('error', 'Не удалось отменить вход при смене счёта', String(error))); saveSettings(); log('warn', 'Автоторговля автоматически отключена: обнаружен не-DEMO счёт'); }
   publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
@@ -659,6 +659,7 @@ app.on('before-quit', event => {
   settings.autoTradingEnabled = false; tradingGate.setPaused(true); try { saveSettings(); } catch (error) { log('error', 'Не удалось сохранить безопасное состояние торговли', String(error)); }
   log('info', 'Приложение завершает работу; сохраняем рыночные данные');
   const tasks = [marketDataStore.save().catch(error => log('error', 'Не удалось сохранить рыночные данные', String(error)))];
+  if (tradeExecutionAdapter) tasks.push(tradeExecutionAdapter.cancelInFlight().catch(error => log('error', 'Не удалось отменить активную команду сделки при завершении', String(error))));
   if (moduleManager) tasks.push(moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error))));
   Promise.allSettled(tasks).then(() => { allowQuit = true; app.quit(); });
 });
