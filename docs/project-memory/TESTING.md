@@ -17,7 +17,7 @@
 - [x] Локально на Node.js 22.16.0: `node --test` — 32 теста пройдены, 0 ошибок (временная локальная копия исходников).
 - [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder, исторического OHLC parser, CDP capture adapter и SQLite MarketDataStore и CRUD ручных примеров.
 - [x] Проверка перезапуска/восстановления SQLite, транзакционного upsert, диапазонных запросов, schema version, dirty revision acknowledgement, backpressure, manual-example snapshots и защита от утечки будущих свечей.
-- [ ] Electron runtime smoke test (`npm run test:electron`) — ожидает результата Windows CI.
+- [ ] Electron runtime smoke test (`npm run test:electron`) проверяет SQLite round-trip и загрузку окна разметки; ожидает результата Windows CI.
 - [x] OTC-фильтр: проверка явного OTC, normal assets, неизвестных символов и неоднозначных alias.
 - [x] Тесты покрывают таймфреймы, OHLC, поздние тики, ограничение памяти, pre-entry окно, изоляцию сокетов и обработку malformed frames.
 
