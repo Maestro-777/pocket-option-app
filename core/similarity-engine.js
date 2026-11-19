@@ -216,6 +216,7 @@ function analyzeSimilarity(input) {
       timeframe,
       direction: sample.direction,
       similarity: Number(similarity.toFixed(2)),
+      qualified: similarity >= options.minSimilarity,
       outcome: sample.similarityOutcome,
       expirySeconds: sample.expirySeconds,
       entryAt: sample.entryAt
