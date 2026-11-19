@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { analyzeSimilarity, prepareExamples, validateOptions } = require('./similarity-engine');
 const { TIMEFRAME_MS } = require('./timeframes');
 
@@ -39,8 +40,16 @@ class DecisionScanner {
   }
 
   invalidateExamples(timeframe = null) {
-    if (timeframe == null) this._examples.clear();
-    else this._examples.delete(String(timeframe).toUpperCase());
+    if (timeframe == null) {
+      this._examples.clear();
+      this._lastScanned.clear();
+      this._restoredKeys.clear();
+      return;
+    }
+    const period = String(timeframe).toUpperCase();
+    this._examples.delete(period);
+    for (const key of [...this._lastScanned.keys()]) if (key.endsWith('|' + period)) this._lastScanned.delete(key);
+    for (const key of [...this._restoredKeys]) if (key.endsWith('|' + period)) this._restoredKeys.delete(key);
   }
 
   _schedule(delay) {
@@ -81,16 +90,35 @@ class DecisionScanner {
     if (cached && cached.key === cacheKey) return cached.prepared;
     const examples = this.marketDataStore.listManualExamples({ timeframe, limit: config.maxExamples });
     const prepared = prepareExamples(examples, timeframe, config);
-    this._examples.set(timeframe, { key: cacheKey, prepared });
-    return prepared;
+    const revisionSource = examples.map(example => String(example.id || '') + ':' + String(example.updatedAt || '')).join('|');
+    const revision = crypto.createHash('sha256').update(revisionSource).digest('hex');
+    const value = { ...prepared, revision };
+    this._examples.set(timeframe, { key: cacheKey, prepared: value });
+    return value;
+  }
+
+  _fingerprint(candles, config, datasetRevision) {
+    const settings = {
+      topK: config.topK, minSimilarity: config.minSimilarity,
+      minExamples: config.minExamples, minDirectionVotes: config.minDirectionVotes,
+      lookback: config.lookback, maxExamples: config.maxExamples,
+      datasetRevision: datasetRevision || ''
+    };
+    const bars = (Array.isArray(candles) ? candles : []).map(candle => [
+      candle.startAt, candle.endAt, candle.open, candle.high, candle.low, candle.close, candle.tickCount
+    ]);
+    return crypto.createHash('sha256').update(JSON.stringify({ settings, bars })).digest('hex');
   }
 
   _restoreLastScanned(key, asset, timeframe) {
     if (this._restoredKeys.has(key)) return;
     this._restoredKeys.add(key);
     const previous = this.marketDataStore.listAnalysisDecisions({ asset, timeframe, limit: 1 })[0];
-    const lastCandle = previous?.queryCandles?.[previous.queryCandles.length - 1];
-    this._lastScanned.set(key, Number.isSafeInteger(lastCandle?.startAt) ? lastCandle.startAt : null);
+    if (previous) {
+      this._lastScanned.set(key, this._fingerprint(
+        previous.queryCandles, previous.paramsSnapshot || {}, previous.paramsSnapshot?.datasetRevision || ''
+      ));
+    } else this._lastScanned.set(key, null);
   }
 
   _scanAsset(asset, settings, timeframes, now) {
@@ -101,10 +129,12 @@ class DecisionScanner {
       if (!candles.length) continue;
       const latest = candles[candles.length - 1];
       const key = asset + '|' + timeframe;
+      const prepared = this._getExamples(timeframe, config);
+      const queryWindow = candles.slice(-config.lookback);
+      const fingerprint = this._fingerprint(queryWindow, config, prepared.revision);
       this._restoreLastScanned(key, asset, timeframe);
-      if (this._lastScanned.get(key) === latest.startAt) continue;
+      if (this._lastScanned.get(key) === fingerprint) continue;
 
-      const examples = this._getExamples(timeframe, config.maxExamples);
       let result;
       try {
         result = analyzeSimilarity({ timeframe, entryAt: now, candles, preparedExamples: prepared.items, skippedExamples: prepared.skipped, options: config });
@@ -121,12 +151,12 @@ class DecisionScanner {
       const saved = this.marketDataStore.createAnalysisDecision({
         asset, timeframe, decisionAt: now, status: result.status,
         direction: result.direction === 'NONE' ? null : result.direction,
-        reason: result.reason, paramsSnapshot: result.options,
+        reason: result.reason, paramsSnapshot: { ...result.options, datasetRevision: prepared.revision },
         matches: result.matches || [], votes: result.votes || { UP: 0, DOWN: 0 },
         averageSimilarity: result.averageSimilarity ?? null,
-        queryCandles: candles.slice(-config.lookback), algorithmVersion: 'shape-v1'
+        queryCandles: queryWindow, algorithmVersion: 'shape-v1'
       });
-      this._lastScanned.set(key, latest.startAt);
+      this._lastScanned.set(key, fingerprint);
       this.stats.decisions++;
       if (saved.status === 'SIGNAL') this.stats.signals++;
       else this.stats.noSignals++;
