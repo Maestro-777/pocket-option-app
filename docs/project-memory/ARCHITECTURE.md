@@ -48,7 +48,7 @@
 
 ## 3. SQLite и модели данных
 
-- `core/market-data-store.js`: встроенный `node:sqlite`, schema version 4.
+- `core/market-data-store.js`: встроенный `node:sqlite`, schema version 5: таблицы `market_candles`, `asset_catalog`, `manual_examples`, `analysis_decisions`, `trade_results`.
 - Таблицы включают rolling OHLC candles, asset catalog, независимые `manual_examples` и `analysis_decisions`.
 - Ручной пример сохраняет отдельные snapshots до входа и после входа. Ручная разметка не является сделкой и не переписывается алгоритмом.
 - `analysis_decisions` хранит сигнал или отказ, причину, настройки, найденные совпадения, голоса, query candle snapshot и версию алгоритма.
