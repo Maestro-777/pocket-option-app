@@ -18,7 +18,8 @@ class FakeDebugger extends EventEmitter {
 
 test('attaches CDP Network domain and ingests a WebSocket tick', async () => {
   const debuggerApi = new FakeDebugger(), hub = new MarketDataHub({ timeframes: ['S5'] });
-  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: hub });
+  const notifiedAssets = [];
+  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: hub, onTick: asset => notifiedAssets.push(asset) });
   assert.equal(await capture.attach(), true);
   assert.equal(debuggerApi.version, '1.3');
   assert.deepEqual(debuggerApi.commands, ['Network.enable']);
@@ -26,6 +27,7 @@ test('attaches CDP Network domain and ingests a WebSocket tick', async () => {
   debuggerApi.frame('socket-1', '42["updateStream",[["EURUSD_otc",1700000000,1.1]]]');
   assert.deepEqual(hub.getAssets(), ['EURUSD_OTC']);
   assert.equal(hub.getHealth().acceptedTicks, 1);
+  assert.deepEqual(notifiedAssets, ['EURUSD_OTC']);
   assert.equal(capture.getStatus().protocol.ticks, 1);
   capture.close();
   assert.equal(debuggerApi.isAttached(), false);
