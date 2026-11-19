@@ -45,6 +45,17 @@ test('does not silently evict assets at capacity', () => {
   assert.equal(hub.getHealth().rejectedAssets, 1);
 });
 
+test('does not reserve asset capacity when a new asset is rejected by persistence backpressure', () => {
+  const hub = new MarketDataHub({ timeframes: ['S5'], maxAssets: 2, maxDirtyCandles: 1 });
+  assert.equal(hub.ingest({ asset: 'EURUSD_OTC', ts: 1000, price: 1.1 }).accepted, true);
+  assert.equal(hub.ingest({ asset: 'GBPUSD_OTC', ts: 1000, price: 1.2 }).reason, 'persistence-backpressure');
+  assert.deepEqual(hub.getAssets(), ['EURUSD_OTC']);
+  const dirty = hub.getDirtyCompletedCandles(6000);
+  hub.acknowledgePersisted(dirty);
+  assert.equal(hub.ingest({ asset: 'GBPUSD_OTC', ts: 6000, price: 1.2 }).accepted, true);
+  assert.deepEqual(hub.getAssets(), ['EURUSD_OTC', 'GBPUSD_OTC']);
+});
+
 test('rejects invalid ticks and configuration', () => {
   const hub = new MarketDataHub({ timeframes: ['S5'] });
   assert.equal(hub.ingest({ asset: 'EURUSD_OTC', ts: 0, price: 1 }).reason, 'invalid-tick');
