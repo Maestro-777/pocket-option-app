@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
     });
     await window.loadFile(path.join(__dirname, '..', 'renderer', 'labeler.html'));
     const rendererReady = await window.webContents.executeJavaScript(
-      "typeof window.pocketApp?.getMarketAssets === 'function' && typeof window.pocketApp?.createManualExample === 'function' && typeof window.pocketApp?.analyzeSimilarity === 'function' && typeof window.pocketApp?.evaluateSimilarityBacktest === 'function' && typeof window.pocketApp?.getAnalysisDecisions === 'function' && !!document.getElementById('chart')"
+      "typeof window.pocketApp?.getMarketAssets === 'function' && typeof window.pocketApp?.createManualExample === 'function' && typeof window.pocketApp?.analyzeSimilarity === 'function' && typeof window.pocketApp?.evaluateSimilarityBacktest === 'function' && typeof window.pocketApp?.getAnalysisDecisions === 'function' && typeof window.pocketApp?.getStatus === 'function' && !!document.getElementById('chart')"
     );
     if (!rendererReady) throw new Error('Manual labeling renderer or restricted preload API did not initialize');
     await window.webContents.executeJavaScript('window.pocketApp.getMarketAssets()');
