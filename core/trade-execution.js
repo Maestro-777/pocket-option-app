@@ -68,7 +68,7 @@ class TradeExecutionAdapter{
    if(asset)candidates=candidates.filter(x=>x.pair===asset);
    if(Number.isFinite(amount)&&amount>0)candidates=candidates.filter(x=>Math.abs(x.amount-amount)<0.011);
    if(candidates.length!==1){
-    const unmatched={matched:false,reason:'ambiguous_or_unmatched_close_event',platformDealId:String(deal.id??deal.ticket??''),amount:Number.isFinite(amount)?amount:null,asset:asset||null,profit:Number(deal.profit)};
+    const rawProfit=Number(deal.profit);const unmatched={matched:false,reason:'ambiguous_or_unmatched_close_event',platformDealId:String(deal.id??deal.ticket??''),amount:Number.isFinite(amount)?amount:null,asset:asset||null,profit:Number.isFinite(rawProfit)?rawProfit:null};
     try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}
     results.push(unmatched);continue;
    }
