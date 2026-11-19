@@ -30,5 +30,26 @@ class MarketDataService{
  return Array.from(merged.values()).filter(c=>options.includeIncomplete===true||c.complete).sort((a,b)=>a.startAt-b.startAt).slice(-limit);}
  getStatus(){const tickCount=this.totalTicks;let historyCandleCount=0,historyAssetCount=0;for(const byTf of this.historyCandles.values()){historyAssetCount++;for(const candles of byTf.values())historyCandleCount+=candles.size;}return Object.freeze({connected:!!this.stats.lastMessageAt&&Date.now()-this.stats.lastMessageAt<30000,assetCount:this.assets.size,otcAssetCount:Array.from(this.assets.values()).filter(x=>x.otc).length,tickAssetCount:this.ticks.size,historyAssetCount,historyCandleCount,tickCount,stats:{...this.stats},supportedTimeframes:Object.keys(TIMEFRAME_MS)});}
  listAssets(options={}){return Array.from(this.assets.values()).filter(x=>options.otcOnly!==true||x.otc).sort((a,b)=>a.symbol.localeCompare(b.symbol)).map(x=>({...x,tickCount:this.ticks.get(x.symbol)?.size||0,historyCandleCount:Array.from(this.historyCandles.get(x.symbol)?.values()||[]).reduce((n,rows)=>n+rows.size,0)}));}
+ exportSnapshot(){
+  const ticks=[];for(const [asset,store] of this.ticks)for(const [ts,price] of store)ticks.push([asset,ts,price]);
+  const history=[];for(const [asset,byTf] of this.historyCandles)for(const [timeframe,rows] of byTf)for(const candle of rows.values())history.push({...candle});
+  history.sort((a,b)=>a.endAt-b.endAt);const retainedHistory=history.slice(-100000);
+  return{schemaVersion:1,savedAt:new Date().toISOString(),assets:Array.from(this.assets.values()).map(x=>({...x})),ticks,history:retainedHistory};
+ }
+ restoreSnapshot(snapshot){
+  if(!snapshot||snapshot.schemaVersion!==1||!Array.isArray(snapshot.assets)||!Array.isArray(snapshot.ticks)||!Array.isArray(snapshot.history))throw new TypeError('Неизвестный формат сохранённых рыночных данных');
+  if(snapshot.assets.length>this.maxAssets||snapshot.ticks.length>this.maxTotalTicks||snapshot.history.length>100000)throw new RangeError('Сохранённый снимок превышает допустимые размеры');
+  this.assets.clear();this.ticks.clear();this.historyCandles.clear();this.tickOrder=[];this.tickOrderIndex=0;this.totalTicks=0;this.stats={received:0,accepted:0,rejected:0,lastMessageAt:null,lastTickAt:null};
+  this.ingestAssets(snapshot.assets);
+  this.ingestTicks(snapshot.ticks);
+  for(const candle of snapshot.history){if(!candle||typeof candle!=='object')continue;const asset=normalizeAsset(candle.asset),timeframe=String(candle.timeframe||'').toUpperCase();let duration;try{duration=getTimeframeDuration(timeframe);}catch(_){continue;}
+   const startAt=Number(candle.startAt),endAt=Number(candle.endAt),open=Number(candle.open),high=Number(candle.high),low=Number(candle.low),close=Number(candle.close);
+   if(!asset||!Number.isFinite(startAt)||!Number.isFinite(endAt)||endAt-startAt!==duration||endAt>Date.now()||![open,high,low,close].every(Number.isFinite)||Math.min(open,high,low,close)<=0||high<Math.max(open,low,close)||low>Math.min(open,high,close))continue;
+   let byTf=this.historyCandles.get(asset);if(!byTf){byTf=new Map();this.historyCandles.set(asset,byTf);}let rows=byTf.get(timeframe);if(!rows){rows=new Map();byTf.set(timeframe,rows);}rows.set(startAt,{asset,timeframe,startAt,endAt,open,high,low,close,tickCount:0,complete:true,source:'history'});
+   if(rows.size>600){const oldest=Array.from(rows.keys()).sort((a,b)=>a-b).slice(0,rows.size-600);for(const key of oldest)rows.delete(key);}
+  }
+  this.stats.lastMessageAt=null;
+  return this.getStatus();
+ }
 }
 module.exports={MarketDataService,normalizeTimestamp,normalizeAsset,MAX_ASSETS,MAX_TICKS_PER_ASSET,MAX_TOTAL_TICKS};
