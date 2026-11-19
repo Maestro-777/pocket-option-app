@@ -464,6 +464,7 @@ async function runSimilarityAnalysis() {
   button.textContent = 'Анализ…';
   try {
     const options = readAnalysisOptions();
+    currentLookback = options.lookback;
     await api.saveAnalysisSettings(options);
     const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), options);
     renderAnalysis(result);
