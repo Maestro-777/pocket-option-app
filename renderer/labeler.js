@@ -10,6 +10,7 @@ let examples = [];
 let marks = { segmentStart: null, entryAt: null, segmentEnd: null, entryPrice: null };
 let markMode = null;
 let editingId = null;
+let editingOriginal = null;
 let journalLoading = false;
 let chartGeometry = null;
 const canvas = $('chart');
@@ -249,8 +250,18 @@ async function saveExample() {
   try {
     const form = readForm();
     if (editingId) {
-      const changes = { ...form };
-      try { Object.assign(changes, buildSnapshots()); } catch (_) {}
+      const markersChanged = !editingOriginal ||
+        marks.segmentStart !== editingOriginal.segmentStart ||
+        marks.segmentEnd !== editingOriginal.segmentEnd ||
+        marks.entryAt !== editingOriginal.entryAt ||
+        selectedAsset() !== editingOriginal.asset ||
+        selectedTimeframe() !== editingOriginal.timeframe;
+      const snapshots = markersChanged ? buildSnapshots() : {
+        segmentStart: editingOriginal.segmentStart, segmentEnd: editingOriginal.segmentEnd,
+        entryAt: editingOriginal.entryAt, inputCandles: editingOriginal.inputCandles,
+        postCandles: editingOriginal.postCandles
+      };
+      const changes = { ...form, ...snapshots };
       const updated = await api.updateManualExample(editingId, changes);
       if (!updated) throw new Error('Пример не найден');
       setStatus('Пример обновлён');
@@ -270,6 +281,7 @@ async function saveExample() {
 
 function resetForm() {
   editingId = null;
+  editingOriginal = null;
   marks = { segmentStart: null, entryAt: null, segmentEnd: null, entryPrice: null };
   $('form-title').textContent = 'Новый пример';
   $('save-example').textContent = 'Сохранить пример';
@@ -286,6 +298,7 @@ function resetForm() {
 
 async function editExample(example) {
   editingId = example.id;
+  editingOriginal = JSON.parse(JSON.stringify(example));
   $('asset-select').value = example.asset;
   $('timeframe-select').value = example.timeframe;
   await loadChart();
