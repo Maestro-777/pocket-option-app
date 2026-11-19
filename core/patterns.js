@@ -6,7 +6,7 @@ function validateCandles(candles, options={}) {
   const tf=String(options.timeframe||'').toUpperCase(), duration=tf?getTimeframeDuration(tf):null;
   const entryAt=options.entryAt==null?Infinity:Number(options.entryAt);
   if(!(entryAt>0)) throw new TypeError('entryAt должен быть положительным timestamp');
-  let previous=-Infinity; const rows=[];
+  let previous=-Infinity,previousEnd=-Infinity; const rows=[];
   for(let i=0;i<candles.length;i++){
     const c=candles[i]; if(!c||typeof c!=='object') throw new TypeError('Некорректная свеча '+i);
     const startAt=Number(c.startAt), endAt=Number(c.endAt);
@@ -14,11 +14,12 @@ function validateCandles(candles, options={}) {
     if(!Number.isFinite(startAt)||!Number.isFinite(endAt)||startAt<=0||endAt<=startAt) throw new TypeError('Некорректное время свечи '+i);
     if(startAt<previous) throw new RangeError('Свечи должны быть отсортированы по времени');
     if(startAt===previous) throw new RangeError('Повторяющаяся свеча');
+    if(startAt<previousEnd) throw new RangeError('Свечи перекрываются по времени');
     if(duration&&endAt-startAt!==duration) throw new RangeError('Длительность свечи не соответствует '+tf);
     if(c.complete!==true) throw new RangeError('Свеча '+i+' не закрыта');
     if(endAt>entryAt) throw new RangeError('Обнаружена утечка данных после точки входа');
     if(high<Math.max(open,close,low)||low>Math.min(open,close,high)) throw new RangeError('Нарушены границы OHLC в свече '+i);
-    previous=startAt; rows.push({startAt,endAt,open,high,low,close,complete:true});
+    previous=startAt; previousEnd=endAt; rows.push({startAt,endAt,open,high,low,close,complete:true});
   }
   if(rows.length<2) throw new RangeError('Для паттерна нужно минимум 2 закрытые свечи');
   return rows;
