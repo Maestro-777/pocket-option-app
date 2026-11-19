@@ -428,6 +428,33 @@ async function runSimilarityAnalysis() {
   }
 }
 
+async function runSimilarityBacktest() {
+  const button = $('run-backtest');
+  if (!selectedTimeframe()) return;
+  button.disabled = true;
+  button.textContent = 'Проверка…';
+  try {
+    const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), {});
+    const accuracy = report.accuracy == null ? 'недостаточно сигналов' : report.accuracy.toFixed(2) + '%';
+    $('backtest-summary').textContent =
+      'Период: ' + report.timeframe +
+      ' · Проверено: ' + report.evaluated +
+      ' · Сигналов: ' + report.signals +
+      ' · Без сигнала: ' + report.noSignal +
+      ' · Точность среди сигналов: ' + accuracy +
+      ' · Покрытие: ' + report.coverage.toFixed(2) + '%' +
+      ' · Пропущено без истории: ' + report.skippedInsufficientHistory +
+      ' · Без бинарного исхода: ' + report.skippedUnknownOutcome;
+    setStatus('Хронологическая проверка завершена');
+  } catch (error) {
+    $('backtest-summary').textContent = error.message;
+    setStatus('Ошибка исторической проверки', true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Проверить на исторических примерах';
+  }
+}
+
 async function reloadAll() {
   await loadAssets();
   await loadChart();
@@ -444,6 +471,7 @@ $('clear-marks').addEventListener('click', () => {
 });
 $('save-example').addEventListener('click', saveExample);
 $('run-analysis').addEventListener('click', runSimilarityAnalysis);
+$('run-backtest').addEventListener('click', runSimilarityBacktest);
 $('cancel-edit').addEventListener('click', resetForm);
 $('reload-chart').addEventListener('click', loadChart);
 $('refresh-all').addEventListener('click', reloadAll);
