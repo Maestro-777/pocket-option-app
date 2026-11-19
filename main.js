@@ -29,6 +29,7 @@ const FULL_CHECK_INTERVAL = 5 * 60_000;
 let mainWindow = null;
 let siteWindow = null;
 let miniWindow = null;
+let annotationWindow = null;
 let tray = null;
 let quitting = false;
 let recoveryInProgress = false;
@@ -83,6 +84,7 @@ function log(level, message, data) {
     fs.appendFileSync(logFile(), JSON.stringify(row) + os.EOL, 'utf8');
   } catch (error) { console.error('Log write failed', error); }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:log', row);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:log', row);
   if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', getPublicStatus());
   console[level === 'error' ? 'error' : 'log']('[PO Background]', row);
 }
@@ -105,6 +107,18 @@ function createMainWindow() {
     if (!quitting) { event.preventDefault(); mainWindow.hide(); log('info', 'Главное окно скрыто в системный трей'); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+function createAnnotationWindow() {
+  if (annotationWindow && !annotationWindow.isDestroyed()) { annotationWindow.show(); annotationWindow.focus(); return annotationWindow; }
+  annotationWindow = new BrowserWindow({
+    width: 1420, height: 980, minWidth: 1080, minHeight: 720,
+    show: false, title: APP_NAME + ' — Разметка исторических примеров', backgroundColor: '#0b1020', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  annotationWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'), { hash: 'annotation' });
+  annotationWindow.once('ready-to-show', () => annotationWindow && annotationWindow.show());
+  annotationWindow.on('closed', () => { annotationWindow = null; });
+  return annotationWindow;
 }
 function createMiniWindow() {
   if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
@@ -244,6 +258,7 @@ function getPublicStatus() {
 function publishStatus() {
   const status = getPublicStatus();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:status', status);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:status', status);
   if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', status);
   return status;
 }
@@ -328,13 +343,14 @@ function isTrustedPocketOptionSender(event) {
 }
 
 function isTrustedControlSender(event) {
-  return !!(mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents);
+  return [mainWindow, annotationWindow].some(win => !!(win && !win.isDestroyed() && event.sender === win.webContents));
 }
 function publishMarketDataStatus() {
   if (marketDataPublishTimer || !mainWindow || mainWindow.isDestroyed()) return;
   marketDataPublishTimer = setTimeout(() => {
     marketDataPublishTimer = null;
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:market-data', marketDataService.getStatus());
+    if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:market-data', marketDataService.getStatus());
     publishStatus();
   }, 1000);
 }
@@ -416,6 +432,10 @@ ipcMain.handle('app:matcher:analyze', async (event, request = {}) => {
     const journal = await decisionJournal.append('DECISION', { asset, ...decision }, snapshot);
     return { ok: true, decision, journalId: journal.id };
   } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:annotation:open-window', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  createAnnotationWindow(); return { ok: true };
 });
 ipcMain.handle('app:analysis:get-config', event => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
@@ -645,6 +665,7 @@ async function runFullCheck(source) {
   const result = { at: new Date().toISOString(), source, passed: checks.every(c => c.ok !== false), checks };
   log(result.passed ? 'info' : 'warn', 'Проверка устойчивости завершена', result);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:check-result', result);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:check-result', result);
   return result;
 }
 
@@ -684,7 +705,7 @@ else app.whenReady().then(async () => {
     getSettings: () => settings,
     getAccount: () => ({ mode: selectedAccount, accountType: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
     getSiteWindow: () => siteWindow,
-    onUpdate: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:trade-update', item); log('info', 'Обновление состояния сделки', item); }
+    onUpdate: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:trade-update', item); if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:trade-update', item); log('info', 'Обновление состояния сделки', item); }
   });
   tradeExecutionAdapter.restore(tradeLedger.listOpen());
   signalScheduler = new SignalScheduler({
@@ -692,6 +713,7 @@ else app.whenReady().then(async () => {
     getConfig: () => settings.analysisConfig || {},
     onDecision: item => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item);
+      if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:signal-decision', item);
       if (settings.autoTradingEnabled === true && item.decision && item.decision.accepted === true && item.withinConfiguredLimit === true && tradeExecutionAdapter) {
         tradeExecutionAdapter.execute(item).catch(error => log('error', 'Ошибка отправки DEMO-сделки', String(error)));
       }
