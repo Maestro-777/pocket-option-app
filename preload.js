@@ -8,6 +8,7 @@ const api = {
   getMarketCandles: (asset, timeframe, options) => ipcRenderer.invoke('app:market:candles', asset, timeframe, options),
   getManualExamples: filters => ipcRenderer.invoke('app:manual-examples:list', filters),
   analyzeSimilarity: (asset, timeframe, options) => ipcRenderer.invoke('app:similarity:analyze', asset, timeframe, options),
+  evaluateSimilarityBacktest: (timeframe, options) => ipcRenderer.invoke('app:similarity:backtest', timeframe, options),
   createManualExample: example => ipcRenderer.invoke('app:manual-examples:create', example),
   updateManualExample: (id, changes) => ipcRenderer.invoke('app:manual-examples:update', id, changes),
   deleteManualExample: id => ipcRenderer.invoke('app:manual-examples:delete', id),
