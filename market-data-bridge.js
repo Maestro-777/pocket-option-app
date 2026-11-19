@@ -4,7 +4,7 @@ if(window.__PT_MARKET_DATA_BRIDGE__)return;
 window.__PT_MARKET_DATA_BRIDGE__=true;
 const NativeWebSocket=window.WebSocket;
 if(typeof NativeWebSocket!=='function')return;
-const ALLOWED=new Set(['updateAssets','updateStream','quotes/stream','updateHistoryNewFast','updateHistoryNew','loadHistoryPeriod','loadHistoryPeriodFast','history/list/v2']);
+const ALLOWED=new Set(['updateAssets','updateStream','quotes/stream','updateHistoryNewFast','updateHistoryNew','loadHistoryPeriod','loadHistoryPeriodFast','history/list/v2','successcloseOrder','s_orders/close']);
 const MAX_ROWS=5000,MAX_HISTORY=10000;
 let sequence=0,activeSocket=null;
 function publish(name,payload,ws){
@@ -15,7 +15,12 @@ function publish(name,payload,ws){
  const safe=[];
  for(const row of rows){
   if(safe.length>=MAX_ROWS)break;
-  if(name.startsWith('updateHistory')||name.startsWith('loadHistory')||name==='history/list/v2'){
+  if(name==='successcloseOrder'||name==='s_orders/close'){
+   const deals=Array.isArray(row)?row:Array.isArray(row&&row.deals)?row.deals:null;
+   const cleanDeal=item=>item&&typeof item==='object'?{id:item.id,ticket:item.ticket,asset:item.asset,symbol:item.symbol,pair:item.pair,direction:item.direction,amount:item.amount,investment:item.investment,profit:item.profit,netProfit:item.netProfit,percentProfit:item.percentProfit,timestamp:item.timestamp,time:item.time,status:item.status,result:item.result}:null;
+   if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length)safe.push({deals:clean});}
+   else{const clean=cleanDeal(row);if(clean)safe.push(clean);}
+  }else if(name.startsWith('updateHistory')||name.startsWith('loadHistory')||name==='history/list/v2'){
    const data=Array.isArray(row)?row[0]:row;
    if(data&&typeof data==='object'){
     const asset=data.asset||data.symbol,history=Array.isArray(data.history)?data.history:Array.isArray(data.data)?data.data:null;
