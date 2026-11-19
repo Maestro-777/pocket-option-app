@@ -64,17 +64,30 @@
       const d = item.decision || {};
       const accepted = d.accepted === true;
       const direction = accepted ? (d.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : (d.reason || 'нет сигнала');
-      const rank = item.rank ? '№' + item.rank + (item.withinConfiguredLimit ? ' · в лимите' : '') : 'не ранжирован';
-      return '<div class="log-entry"><span class="level ' + (accepted ? 'accepted' : 'rejected') + '">' +
+      const rank = item.rank ? '№' + item.rank + (item.withinConfiguredLimit ? ' · в лимите отбора' : '') : 'не ранжирован';
+      const winRate = item.ranking && item.ranking.historicalWinRate != null ? (item.ranking.historicalWinRate * 100).toFixed(1) + '%' : 'нет размеченных исходов';
+      const matches = (d.matches || []).map(m =>
+        '<div class="log-entry"><b>' + esc(m.sourcePair) + '</b><span>' + esc(m.direction) +
+        '</span><span>' + Number(m.similarity || 0).toFixed(2) + '%</span><span>' + esc(m.outcome || 'UNKNOWN') +
+        '</span><small>' + esc(m.exampleId) + '</small></div>'
+      ).join('');
+      const detail = matches ? '<details class="signal-match-details"><summary>Исторические совпадения (' + d.matchCount + ')</summary>' + matches + '</details>' : '';
+      return '<article class="signal-decision"><div class="log-entry"><span class="level ' + (accepted ? 'accepted' : 'rejected') + '">' +
         (accepted ? 'СИГНАЛ' : 'ОТКАЗ') + '</span><b>' + esc(item.asset) + '</b><span>' + esc(item.timeframe) +
         '</span><span>' + esc(direction) + '</span><span>' + Number(d.averageSimilarity || 0).toFixed(2) +
-        '% · ' + Number(d.matchCount || 0) + ' совп.</span><span>' + esc(rank) + '</span></div>';
+        '% · ' + Number(d.matchCount || 0) + ' совп.</span><span>' + esc(rank) + '</span></div>' +
+        '<small class="signal-meta">ВВЕРХ: ' + Number(d.upVotes || 0) + ' · ВНИЗ: ' + Number(d.downVotes || 0) +
+        ' · Исторический win rate размеченных совпадений: ' + esc(winRate) + '</small>' + detail + '</article>';
     }).join('');
   }
 
   async function loadRecentDecisions() {
     const result = await api.getRecentDecisions();
-    if (result && result.ok) { liveDecisions = result.decisions || []; renderLiveDecisions(); }
+    if (result && result.ok) {
+      const known = new Set(liveDecisions.map(item => item.signalId));
+      liveDecisions = liveDecisions.concat((result.decisions || []).filter(item => !known.has(item.signalId))).slice(0,100);
+      renderLiveDecisions();
+    }
   }
 
   async function scanNow() {
@@ -321,7 +334,7 @@
     await refreshExamples();
     await loadAnalysisConfig();
   });
-  api.onSignalDecision(item => { liveDecisions.unshift(item); liveDecisions = liveDecisions.slice(0,100); renderLiveDecisions(); });
+  api.onSignalDecision(item => { liveDecisions = [item].concat(liveDecisions.filter(x => x.signalId !== item.signalId)).slice(0,100); renderLiveDecisions(); });
   api.onMarketData(() => {
     if ($('page-annotation').classList.contains('active') && !selectedAsset()) loadAssets();
   });
