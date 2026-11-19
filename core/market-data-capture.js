@@ -1,13 +1,16 @@
 'use strict';
 
 const { PocketOptionProtocol } = require('./pocketoption-protocol');
+const { AssetCatalog } = require('./asset-catalog');
 
 class MarketDataCapture {
   constructor(options = {}) {
-    if (!options.debuggerApi || typeof options.debuggerApi.on !== 'function') throw new TypeError('debuggerApi должен поддерживать события Chromium debugger');
+    const debuggerMethods = ['on', 'removeListener', 'isAttached', 'attach', 'sendCommand', 'detach'];
+    if (!options.debuggerApi || debuggerMethods.some(name => typeof options.debuggerApi[name] !== 'function')) throw new TypeError('debuggerApi должен предоставлять полный интерфейс Chromium debugger');
     if (!options.marketDataHub || typeof options.marketDataHub.ingest !== 'function') throw new TypeError('marketDataHub должен предоставлять ingest()');
     this.debuggerApi = options.debuggerApi;
     this.marketDataHub = options.marketDataHub;
+    this.assetCatalog = options.assetCatalog || new AssetCatalog();
     this.log = typeof options.log === 'function' ? options.log : () => {};
     this.onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
     this.maxSockets = options.maxSockets == null ? 32 : Number(options.maxSockets);
@@ -19,6 +22,9 @@ class MarketDataCapture {
     this.lastTickReceivedAt = null;
     this.lastError = null;
     this.rejectedTicks = 0;
+    this.rejectedUnknownAssets = 0;
+    this.rejectedNonOtcAssets = 0;
+    this.rejectedAmbiguousAssets = 0;
     this._ownsDebugger = false;
     this._closing = false;
     this._protocols = new Map();
@@ -82,9 +88,19 @@ class MarketDataCapture {
     }
     this.lastFrameAt = Date.now();
     const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
+    if (decoded?.eventName === 'updateAssets') {
+      const catalogResult = this.assetCatalog.ingest(decoded.payload);
+      this.log('info', 'Получен каталог активов Pocket Option', catalogResult);
+      this._notify();
+      return;
+    }
     if (!decoded?.ticks?.length) return;
     for (const tick of decoded.ticks) {
-      const result = this.marketDataHub.ingest(tick);
+      const asset = this.assetCatalog.resolve(tick.asset);
+      if (!asset) { this.rejectedTicks++; this.rejectedUnknownAssets++; continue; }
+      if (asset.ambiguous) { this.rejectedTicks++; this.rejectedAmbiguousAssets++; continue; }
+      if (!asset.isOTC || !asset.asset) { this.rejectedTicks++; this.rejectedNonOtcAssets++; continue; }
+      const result = this.marketDataHub.ingest({ ...tick, asset: asset.asset });
       if (result.accepted) {
         this.lastTickAt = tick.ts;
         this.lastTickReceivedAt = Date.now();
@@ -111,7 +127,12 @@ class MarketDataCapture {
     return {
       status: this.status, attached: this.attached, activeSockets: this._protocols.size,
       lastFrameAt: this.lastFrameAt, lastTickAt: this.lastTickAt, lastTickReceivedAt: this.lastTickReceivedAt,
-      lastError: this.lastError, rejectedTicks: this.rejectedTicks, protocol
+      lastError: this.lastError, rejectedTicks: this.rejectedTicks,
+      rejectedUnknownAssets: this.rejectedUnknownAssets,
+      rejectedNonOtcAssets: this.rejectedNonOtcAssets,
+      rejectedAmbiguousAssets: this.rejectedAmbiguousAssets,
+      catalog: { total: this.assetCatalog.size, otc: this.assetCatalog.listOTC().length, ...this.assetCatalog.stats },
+      protocol
     };
   }
 
