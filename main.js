@@ -7,7 +7,10 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
-const { MarketDataService } = require('./core/market-data');
+const { MarketDataService, normalizeAsset } = require('./core/market-data');
+const { ExampleStore } = require('./core/example-store');
+const { DecisionJournal } = require('./core/decision-journal');
+const { analyzeSituation } = require('./core/matcher');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -53,6 +56,8 @@ const userRoot = () => app.getPath('userData');
 const logsDir = () => path.join(userRoot(), 'logs');
 const settingsFile = () => path.join(userRoot(), 'settings.json');
 const logFile = () => path.join(logsDir(), 'application.log');
+const exampleStore = new ExampleStore(path.join(userRoot(), 'data', 'examples.json'));
+const decisionJournal = new DecisionJournal(path.join(logsDir(), 'decisions.jsonl'));
 
 function log(level, message, data) {
   const row = { at: new Date().toISOString(), level, message: String(message), ...(data ? { data } : {}) };
@@ -341,6 +346,52 @@ ipcMain.handle('app:market-data:get-candles', (event, request = {}) => {
       asOf: request.asOf
     });
     return { ok: true, candles };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+
+ipcMain.handle('app:examples:list', async (event, filters = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    const timeframe = filters.timeframe == null ? undefined : String(filters.timeframe).toUpperCase();
+    const pair = filters.pair == null ? undefined : normalizeAsset(filters.pair);
+    if (filters.pair != null && !pair) throw new TypeError('Некорректная валютная пара');
+    return { ok: true, examples: await exampleStore.list({ timeframe, pair }) };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:add', async (event, example) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, example: await exampleStore.add(example) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:update', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request.id !== 'string' || !request.patch || typeof request.patch !== 'object' || Array.isArray(request.patch)) throw new TypeError('Некорректный запрос изменения примера');
+    return { ok: true, example: await exampleStore.update(request.id, request.patch) };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:remove', async (event, id) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, removed: await exampleStore.remove(String(id || '')) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:matcher:analyze', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new TypeError('Некорректный запрос анализа');
+    const asset = normalizeAsset(request.asset);
+    const timeframe = String(request.timeframe || '').toUpperCase();
+    if (!asset) throw new TypeError('Некорректная валютная пара');
+    const entryAt = request.entryAt == null ? Date.now() : Number(request.entryAt);
+    const lookback = request.lookback == null ? 30 : Number(request.lookback);
+    if (!Number.isFinite(entryAt) || entryAt <= 0 || !Number.isInteger(lookback) || lookback < 2 || lookback > 10000) throw new RangeError('Некорректная точка входа или размер окна');
+    const candles = marketDataService.getCandles(asset, timeframe, { asOf: entryAt, limit: lookback });
+    if (candles.length < 2) return { ok: false, reason: 'insufficient_market_data', availableCandles: candles.length };
+    const examples = await exampleStore.list({ timeframe });
+    const decision = analyzeSituation({ candles, timeframe, entryAt, examples, config: request.config || {} });
+    const snapshot = { ...decision.settingsSnapshot, asset, timeframe, entryAt, lookback, algorithmVersion: 1 };
+    const journal = await decisionJournal.append('DECISION', { asset, ...decision }, snapshot);
+    return { ok: true, decision, journalId: journal.id };
   } catch (error) { return { ok: false, reason: String(error.message || error) }; }
 });
 ipcMain.on('site:balance', (event, payload) => {
