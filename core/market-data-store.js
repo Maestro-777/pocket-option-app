@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { TIMEFRAME_MS } = require('./timeframes');
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const VALID_TIMEFRAMES = new Set(Object.keys(TIMEFRAME_MS));
 
 function validateCandle(candle) {
@@ -152,6 +152,37 @@ class MarketDataStore {
         COMMIT;
       `);
     }
+    if (version < 5) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE trade_results (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          event_key TEXT NOT NULL UNIQUE CHECK(length(event_key) BETWEEN 1 AND 256),
+          broker_trade_id TEXT,
+          asset TEXT CHECK(asset IS NULL OR length(asset) BETWEEN 1 AND 64),
+          timeframe TEXT CHECK(timeframe IS NULL OR timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          direction TEXT CHECK(direction IS NULL OR direction IN ('UP','DOWN')),
+          account_mode TEXT NOT NULL CHECK(account_mode IN ('DEMO','REAL','UNKNOWN')),
+          amount REAL NOT NULL CHECK(amount > 0),
+          profit REAL NOT NULL,
+          result TEXT NOT NULL CHECK(result IN ('WIN','LOSS','DRAW')),
+          entry_at INTEGER CHECK(entry_at IS NULL OR entry_at > 0),
+          closed_at INTEGER NOT NULL CHECK(closed_at > 0),
+          expiry_seconds INTEGER CHECK(expiry_seconds IS NULL OR expiry_seconds BETWEEN 1 AND 86400),
+          payout_rate REAL CHECK(payout_rate IS NULL OR payout_rate >= 0),
+          balance_after REAL CHECK(balance_after IS NULL OR balance_after >= 0),
+          source_event TEXT NOT NULL CHECK(length(source_event) BETWEEN 1 AND 64),
+          created_at INTEGER NOT NULL CHECK(created_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE UNIQUE INDEX idx_trade_results_broker_id ON trade_results(broker_trade_id) WHERE broker_trade_id IS NOT NULL;
+        CREATE INDEX idx_trade_results_closed_at ON trade_results(closed_at DESC);
+        CREATE INDEX idx_trade_results_asset_time ON trade_results(asset,closed_at DESC);
+        CREATE INDEX idx_trade_results_account_time ON trade_results(account_mode,closed_at DESC);
+        PRAGMA user_version = 5;
+        COMMIT;
+      `);
+      version = 5;
+    }
   }
 
   _prepareStatements() {
@@ -183,6 +214,11 @@ class MarketDataStore {
         SELECT start_at FROM market_candles WHERE asset=? AND timeframe=?
         ORDER BY start_at DESC LIMIT ?
       )
+    `);
+    this._insertTradeResult = this.db.prepare(`
+      INSERT OR IGNORE INTO trade_results
+      (id,event_key,broker_trade_id,asset,timeframe,direction,account_mode,amount,profit,result,entry_at,closed_at,expiry_seconds,payout_rate,balance_after,source_event,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
     this._insertAnalysisDecision = this.db.prepare(`
       INSERT INTO analysis_decisions
