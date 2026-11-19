@@ -84,7 +84,7 @@ class TradeExecutionAdapter{
    const outcome=platformProfit>0?'WIN':'LOSS',profit=platformProfit>0?platformProfit:-trade.amount;
    if(asset)this.correlationVerified=true;
    const closed=await this.gate.closeTrade(trade.tradeId,{outcome});
-   const account=this.getAccount()||{},balanceAfter=account.balanceAt&&Date.now()-Number(account.balanceAt)<=30000&&Number.isFinite(Number(account.balance))&&Number(account.balance)>=0?Number(account.balance):null;
+   const balanceAfter=deal.balanceAfter==null?null:Number(deal.balanceAfter);
    if(this.ledger)await this.ledger.closeTrade(trade.tradeId,{profit,outcome,closedAt:Date.now(),platformDealId:String(deal.id??deal.ticket??''),balanceAfter}).catch(error=>this.onUpdate({type:'ledger_error',tradeId:trade.tradeId,message:String(error.message||error)}));
    this.submitted.delete(trade.tradeId);
    const record={matched:true,tradeId:trade.tradeId,platformDealId:String(deal.id??deal.ticket??''),pair:trade.pair,timeframe:trade.timeframe,direction:trade.direction,amount:trade.amount,platformProfit,profit,outcome,closedAt:Date.now(),accountMode:'DEMO'};
@@ -105,8 +105,7 @@ class TradeExecutionAdapter{
   if(action==='closed'){
    const profit=Number(profitValue);if(!Number.isFinite(profit))return{ok:false,reason:'invalid_profit'};
    const outcome=profit>0?'WIN':profit<0?'LOSS':'DRAW';
-   const account=this.getAccount()||{},balanceAfter=account.balanceAt&&Date.now()-Number(account.balanceAt)<=30000&&Number.isFinite(Number(account.balance))&&Number(account.balance)>=0?Number(account.balance):null;
-   if(this.ledger)await this.ledger.closeTrade(id,{profit,outcome,closedAt:Date.now(),platformDealId:null,balanceAfter});
+   if(this.ledger)await this.ledger.closeTrade(id,{profit,outcome,closedAt:Date.now(),platformDealId:null,balanceAfter:null});
    const closed=await this.gate.closeTrade(id,{outcome});this.submitted.delete(id);
    const record={tradeId:id,pair:trade.pair,timeframe:trade.timeframe,direction:trade.direction,profit,outcome,closedAt:Date.now(),manuallyReconciled:true};
    await this._journal('TRADE_CLOSED',record,{});this.onUpdate({type:'closed',trade:closed,result:record});return{ok:true,record};
