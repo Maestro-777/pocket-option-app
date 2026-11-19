@@ -11,6 +11,7 @@ const { MarketDataHub } = require('./core/market-data');
 const { AssetCatalog } = require('./core/asset-catalog');
 const { MarketDataStore } = require('./core/market-data-store');
 const MarketDataCapture = require('./core/market-data-capture');
+const { analyzeSimilarity, validateOptions } = require('./core/similarity-engine');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -444,6 +445,24 @@ ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => 
     fromAt: options?.fromAt, toAt: options?.toAt
   });
 });
+ipcMain.handle('app:similarity:analyze', (event, asset, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataHub || !marketDataStore) throw new Error('Рыночные данные или SQLite хранилище недоступны');
+  const symbol = String(asset || '').trim().toUpperCase();
+  const period = String(timeframe || '').trim().toUpperCase();
+  if (!symbol.endsWith('_OTC')) throw new TypeError('Анализ разрешён только для OTC-активов');
+  const config = validateOptions(options);
+  const entryAt = Date.now();
+  const candles = marketDataHub.getCandles(symbol, period, { asOf: entryAt }).slice(-config.lookback);
+  const examples = marketDataStore.listManualExamples({ timeframe: period, limit: config.maxExamples });
+  const result = analyzeSimilarity({ timeframe: period, entryAt, candles, examples, options: config });
+  log('info', 'Выполнен поиск исторических совпадений', {
+    asset: symbol, timeframe: period, status: result.status, direction: result.direction || 'NONE',
+    matches: result.matches.length, qualified: result.qualifiedMatches.length, votes: result.votes
+  });
+  return result;
+});
+
 ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
