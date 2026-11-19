@@ -49,10 +49,12 @@ function renderStatus(status) {
   $('site-dot').className = status.site.running && !status.account.stale ? 'status-dot online' : 'status-dot';
   const market = status.marketData || {};
   const marketAssets = Array.isArray(market.assets) ? market.assets : [];
-  $('market-stream-state').textContent = market.acceptedTickCount ? 'Получаются тики' : market.eventCount ? 'Каталог / история' : 'Нет данных';
+  const marketFresh = market.lastTickAt != null && Date.now() - market.lastTickAt <= 30_000;
+  $('market-stream-state').textContent = marketFresh ? 'Поток активен' : market.catalogAssetCount ? 'Нет свежих тиков' : 'Нет данных';
   $('market-data-summary').textContent = market.eventCount
     ? 'Событий: ' + market.eventCount + ' · тиков: ' + market.acceptedTickCount +
-      ' · активов с потоком: ' + market.assetCount + ' · в каталоге: ' + market.catalogAssetCount
+      ' · активов с потоком: ' + market.assetCount + ' · в каталоге: ' + market.catalogAssetCount +
+      (market.lastTickAt ? ' · последний тик: ' + Math.round(Math.max(0, Date.now() - market.lastTickAt) / 1000) + ' сек. назад' : '')
     : 'Ожидание рыночных событий от Pocket Option';
   $('market-assets').innerHTML = marketAssets.length
     ? marketAssets.slice(0, 20).map(item =>
