@@ -50,3 +50,12 @@ test('updates existing entries without duplicating catalog rows', () => {
   assert.equal(result.accepted, 0);
   assert.equal(catalog.stats.rowsSeen, 2);
 });
+
+test('restores persisted catalog rows and remembers explicit OTC suffixes', () => {
+  const catalog = new AssetCatalog();
+  assert.equal(catalog.restore([{ asset: 'EURUSD_OTC', rawSymbol: 'EURUSD_otc', label: 'EUR/USD OTC', isOTC: true }]), 1);
+  assert.equal(catalog.resolve('EURUSD_otc').isOTC, true);
+  assert.equal(catalog.rememberExplicitOtc('GBPUSD_otc').asset, 'GBPUSD_OTC');
+  assert.equal(catalog.listOTC().length, 2);
+  assert.equal(catalog.revision, 1);
+});
