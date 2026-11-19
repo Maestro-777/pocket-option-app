@@ -19,7 +19,7 @@
 - core/pocketoption-protocol.js: разбор Socket.IO текстовых кадров и бинарных UTF-8 JSON attachments; нормализация updateStream/quotes/stream и OHLC-истории из updateHistoryNewFast/loadHistoryPeriod/history/list/v2.
 - core/asset-catalog.js: чтение updateAssets, нормализация символов, определение OTC по явному маркеру символа/названия и отказ от неоднозначных alias.
 - core/market-data-capture.js: изолированный CDP Network capture через Electron webContents.debugger, отдельный декодер на каждый WebSocket.
-- core/market-data-store.js: SQLite-хранилище свечей и каталога через встроенный `node:sqlite`; транзакционные upsert, контроль целостности и восстановление.
+- core/market-data-store.js: SQLite-хранилище свечей, каталога и независимых ручных примеров через встроенный `node:sqlite`; транзакционные upsert, CRUD, контроль целостности и восстановление.
 - main.js подключает CDP capture к окну Pocket Option и публикует статус/диагностику рыночного потока.
 - Код modules/* выполняется в main process с его полномочиями, это не sandbox.
 
