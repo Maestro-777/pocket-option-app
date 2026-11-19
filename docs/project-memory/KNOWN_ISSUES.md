@@ -56,3 +56,4 @@ README/package.json указывают 0.1.1, Developer Guide/User Guide ука�
 
 - Исторические price-only ряды Pocket Option (`[timestamp, price]`) не дают OHLC high/low и поэтому пропускаются; для разметки нужны полные OHLC бары либо live-тики, из которых можно построить свечи.
 - В live-событиях без timestamp время фиксируется по моменту получения WebSocket кадра. Это соответствует fallback в `pocket-tracker`, но точность времени зависит от сетевой задержки.
+\n22. `trade-coordinator.js` пока является изолированным planner: pause/slot-limit/dedup/ranking протестированы отдельно, но он не подключён к live scanner и не видит реальные pending/open positions. Это не означает, что автоторговля готова.\n
