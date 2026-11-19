@@ -12,6 +12,7 @@ let markMode = null;
 let editingId = null;
 let editingOriginal = null;
 let journalLoading = false;
+let currentLookback = 30;
 let chartGeometry = null;
 const canvas = $('chart');
 const ctx = canvas.getContext('2d');
@@ -264,13 +265,17 @@ async function saveExample() {
       const changes = { ...form, ...snapshots };
       const updated = await api.updateManualExample(editingId, changes);
       if (!updated) throw new Error('Пример не найден');
-      setStatus('Пример обновлён');
+      setStatus(snapshots.inputCandles.length < currentLookback
+        ? 'Пример обновлён, но не участвует в поиске: до входа ' + snapshots.inputCandles.length + ' свечей, требуется ' + currentLookback
+        : 'Пример обновлён');
     } else {
       const snapshot = buildSnapshots();
       const saved = await api.createManualExample({
         ...snapshot, ...form, asset: selectedAsset(), timeframe: selectedTimeframe()
       });
-      setStatus('Пример сохранён: ' + saved.id);
+      setStatus(snapshot.inputCandles.length < currentLookback
+        ? 'Пример сохранён, но пока не участвует в поиске: до входа ' + snapshot.inputCandles.length + ' свечей, требуется ' + currentLookback
+        : 'Пример сохранён: ' + saved.id);
     }
     resetForm();
     await loadExamples();
@@ -353,7 +358,8 @@ function renderExamples() {
     direction.textContent = example.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ';
     head.append(title, direction);
     const meta = document.createElement('div'); meta.className = 'example-meta';
-    meta.textContent = 'Вход ' + fmtTime(example.entryAt) + ' · ' + example.expirySeconds + ' сек. · ' + OUTCOMES[example.outcome];
+    const inputCount = Array.isArray(example.inputCandles) ? example.inputCandles.length : 0;
+    meta.textContent = 'Вход ' + fmtTime(example.entryAt) + ' · ' + example.expirySeconds + ' сек. · ' + OUTCOMES[example.outcome] + ' · входных свечей ' + inputCount + '/' + currentLookback + (inputCount < currentLookback ? ' · не участвует в текущем поиске' : '');
     const actions = document.createElement('div'); actions.className = 'example-actions';
     const edit = document.createElement('button'); edit.className = 'button secondary'; edit.textContent = 'Редактировать';
     edit.addEventListener('click', () => editExample(example));
@@ -385,7 +391,8 @@ async function loadAnalysisSettings() {
   $('analysis-threshold').value = String(saved.similarityMinSimilarity ?? 80);
   $('analysis-min-examples').value = String(saved.similarityMinExamples ?? 3);
   $('analysis-min-votes').value = String(saved.similarityMinDirectionVotes ?? 6);
-  $('analysis-lookback').value = String(saved.similarityLookback ?? 30);
+  currentLookback = Number(saved.similarityLookback ?? 30);
+  $('analysis-lookback').value = String(currentLookback);
   const selected = Array.isArray(saved.analysisTimeframes) && saved.analysisTimeframes.length
     ? saved.analysisTimeframes : TIMEFRAMES;
   document.querySelectorAll('.analysis-timeframe').forEach(input => {
