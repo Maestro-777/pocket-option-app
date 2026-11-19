@@ -12,6 +12,7 @@ let markMode = null;
 let editingId = null;
 let editingOriginal = null;
 let journalLoading = false;
+let tradeStatsLoading = false;
 let currentLookback = 30;
 let chartGeometry = null;
 const canvas = $('chart');
@@ -576,6 +577,99 @@ async function loadLiveSignals() {
   }
 }
 
+function formatProfit(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return (number > 0 ? '+' : '') + number.toFixed(2);
+}
+
+function renderTradeStatistics(statistics, recent) {
+  const summary = statistics?.overall || { total: 0, wins: 0, losses: 0, draws: 0, winRate: null, netProfit: 0 };
+  const summaryRoot = $('trade-stats-summary');
+  summaryRoot.replaceChildren();
+  const cards = [
+    ['Закрытых сделок', String(summary.total)],
+    ['Чистый P/L', formatProfit(summary.netProfit)],
+    ['Win rate', summary.winRate == null ? 'н/д' : summary.winRate.toFixed(1) + '%'],
+    ['WIN / LOSS / DRAW', summary.wins + ' / ' + summary.losses + ' / ' + summary.draws]
+  ];
+  for (const [label, value] of cards) {
+    const card = document.createElement('div');
+    card.className = 'trade-stat-card';
+    const title = document.createElement('span'); title.textContent = label;
+    const amount = document.createElement('strong'); amount.textContent = value;
+    card.append(title, amount); summaryRoot.append(card);
+  }
+
+  const breakdown = $('trade-stats-breakdown');
+  breakdown.replaceChildren();
+  const groups = [
+    ['Счёт', statistics?.byAccountMode || []],
+    ['Пара', (statistics?.byAsset || []).slice(0, 8)],
+    ['Таймфрейм', statistics?.byTimeframe || []]
+  ];
+  for (const [label, items] of groups) {
+    const block = document.createElement('div');
+    block.className = 'trade-stat-group';
+    const heading = document.createElement('h3'); heading.textContent = label;
+    block.append(heading);
+    if (!items.length) {
+      const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'Нет данных'; block.append(empty);
+    } else {
+      for (const item of items) {
+        const line = document.createElement('div'); line.className = 'trade-stat-line';
+        const name = document.createElement('span'); name.textContent = item.key;
+        const value = document.createElement('b');
+        value.textContent = formatProfit(item.netProfit) + ' · ' + item.total + ' сдел. · ' +
+          (item.winRate == null ? 'н/д' : item.winRate.toFixed(1) + '%');
+        line.append(name, value); block.append(line);
+      }
+    }
+    breakdown.append(block);
+  }
+
+  const list = $('trade-results');
+  list.replaceChildren();
+  $('trade-result-count').textContent = String(summary.total);
+  if (!recent?.length) {
+    const empty = document.createElement('p'); empty.className = 'empty';
+    empty.textContent = 'Пока нет закрытых сделок в наблюдаемом WebSocket-потоке.';
+    list.append(empty); return;
+  }
+  for (const item of recent) {
+    const row = document.createElement('article'); row.className = 'decision-entry';
+    const heading = document.createElement('div'); heading.className = 'trade-result-heading';
+    const title = document.createElement('span');
+    title.textContent = fmtTime(item.closedAt) + ' · ' + (item.asset || 'Пара не определена') + ' · ' + (item.timeframe || 'TF не определён');
+    const outcome = document.createElement('b');
+    outcome.className = item.result === 'WIN' ? 'direction-up' : item.result === 'LOSS' ? 'direction-down' : '';
+    outcome.textContent = item.result;
+    heading.append(title, outcome);
+    const meta = document.createElement('div'); meta.className = 'example-meta';
+    meta.textContent = (item.direction === 'UP' ? 'ВВЕРХ' : item.direction === 'DOWN' ? 'ВНИЗ' : 'Направление не определено') +
+      ' · ' + item.accountMode + ' · ставка ' + item.amount.toFixed(2) +
+      ' · P/L ' + formatProfit(item.profit) +
+      (item.expirySeconds ? ' · экспирация ' + item.expirySeconds + ' сек.' : '');
+    row.append(heading, meta); list.append(row);
+  }
+}
+
+async function loadTradeStatistics() {
+  if (tradeStatsLoading) return;
+  tradeStatsLoading = true;
+  try {
+    const [statistics, recent] = await Promise.all([
+      api.getTradeStatistics(),
+      api.getTradeResults({ limit: 20 })
+    ]);
+    renderTradeStatistics(statistics, recent || []);
+  } catch (error) {
+    $('trade-stats-summary').textContent = error.message;
+  } finally {
+    tradeStatsLoading = false;
+  }
+}
+
 function renderDecisionJournal(items) {
   const list = $('decision-journal');
   list.replaceChildren();
@@ -624,6 +718,7 @@ async function reloadAll() {
   await loadChart();
   await loadExamples();
   await loadDecisionJournal();
+  await loadTradeStatistics();
 }
 
 $('mark-start').addEventListener('click', () => setMarkMode('start'));
@@ -664,5 +759,7 @@ fillTimeframes();
 resizeCanvas();
 reloadAll().catch(error => setStatus(error.message, true));
 setInterval(loadDecisionJournal, 5000);
+setInterval(loadTradeStatistics, 5000);
+loadTradeStatistics();
 loadLiveSignals();
 setInterval(loadLiveSignals, 3000);
