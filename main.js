@@ -238,7 +238,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
+    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
   };
 }
 function publishStatus() {
@@ -631,6 +631,8 @@ async function runFullCheck(source) {
   checks.push({ name: 'Анализ сигналов', ok: !!signalScheduler, state: signalScheduler ? 'active' : 'not-connected', detail: 'Непрерывный анализ OTC работает; автоматическое исполнение сделок ещё не подключено' });
   checks.push({ name: 'Непрерывный анализ OTC', ok: !!(signalScheduler && signalScheduler.getStatus().running), detail: signalScheduler ? JSON.stringify(signalScheduler.getStatus()) : 'Не запущен' });
   checks.push({ name: 'Рыночные данные', ok: true, state: marketDataService.getStatus().connected ? 'connected' : 'waiting', detail: JSON.stringify(marketDataService.getStatus()) });
+  const demoTradeSafe = settings.autoTradingEnabled !== true || (selectedAccount === 'DEMO' && lastBalance && lastBalance.accountType === 'demo' && siteWindow && !siteWindow.isDestroyed() && siteWindow.webContents.getURL().includes('/demo-quick-high-low/') && tradeLedgerHealthy);
+  checks.push({ name: 'DEMO execution guard', ok: demoTradeSafe, detail: settings.autoTradingEnabled ? 'Автоторговля вооружена только при подтверждённом DEMO и исправном журнале' : 'Автоторговля выключена' });
   const result = { at: new Date().toISOString(), source, passed: checks.every(c => c.ok !== false), checks };
   log(result.passed ? 'info' : 'warn', 'Проверка устойчивости завершена', result);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:check-result', result);
