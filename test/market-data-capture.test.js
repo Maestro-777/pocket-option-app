@@ -84,3 +84,20 @@ test('does not report listening when the target closes during Network.enable', a
   assert.equal(capture.getStatus().status, 'stopped');
   assert.equal(capture.getStatus().attached, false);
 });
+
+test('uses updateAssets catalog to admit only confirmed OTC assets', async () => {
+  const debuggerApi = new FakeDebugger();
+  const hub = new MarketDataHub({ timeframes: ['S5'] });
+  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: hub });
+  await capture.attach();
+  debuggerApi.created('socket');
+  debuggerApi.frame('socket', '42["updateAssets",[[1,"EURUSD","EUR/USD"],[2,"EURUSD_otc","EUR/USD OTC"],[3,"GBPUSD_otc","GBP/USD OTC"],[4,"USDJPY","USD/JPY"]]]');
+  debuggerApi.frame('socket', '42["updateStream",[["EURUSD",1700000000,1.1],["EURUSD_otc",1700000000,1.2],["GBPUSD_otc",1700000000,1.3],["USDJPY",1700000000,1.4],["AUDUSD",1700000000,1.5]]]');
+  assert.deepEqual(hub.getAssets(), ['EURUSD_OTC', 'GBPUSD_OTC']);
+  assert.equal(hub.getHealth().acceptedTicks, 2);
+  assert.equal(capture.getStatus().rejectedAmbiguousAssets, 1);
+  assert.equal(capture.getStatus().rejectedNonOtcAssets, 1);
+  assert.equal(capture.getStatus().rejectedUnknownAssets, 1);
+  assert.equal(capture.getStatus().catalog.otc, 2);
+  capture.close();
+});
