@@ -160,17 +160,19 @@ function drawChart() {
     const x = left + step * (index + 0.5);
     ctx.fillText(new Date(candles[index].startAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }), x, bottom + 10);
   }
-  drawMarker(marks.segmentStart, '#65a0ff', 'СТАРТ', false);
-  drawMarker(marks.entryAt, '#f5c45e', 'ВХОД', false);
-  drawMarker(marks.segmentEnd, '#c58bff', 'КОНЕЦ', true);
+  drawMarker(marks.segmentStart, '#65a0ff', 'СТАРТ', 'start');
+  drawMarker(marks.entryAt, '#f5c45e', 'ВХОД', 'entry');
+  drawMarker(marks.segmentEnd, '#c58bff', 'КОНЕЦ', 'end');
 }
 
-function drawMarker(timestamp, color, label, isEnd) {
+function drawMarker(timestamp, color, label, type) {
   if (!chartGeometry || timestamp == null) return;
   const { left, right, top, bottom, step } = chartGeometry;
-  let index = candles.findIndex(c => isEnd ? c.endAt === timestamp : c.startAt === timestamp);
+  const index = candles.findIndex(c => type === 'end' ? c.endAt === timestamp : c.startAt <= timestamp && c.endAt > timestamp);
   if (index < 0) return;
-  const x = isEnd ? left + step * (index + 1) : left + step * (index + 0.5);
+  const candle = candles[index];
+  const fraction = type === 'entry' ? Math.max(0, Math.min(1, (timestamp - candle.startAt) / (candle.endAt - candle.startAt))) : 0.5;
+  const x = type === 'end' ? left + step * (index + 1) : left + step * (index + fraction);
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.setLineDash([5, 4]);
@@ -207,7 +209,8 @@ function handleChartClick(event) {
   const candle = candles[index];
   if (markMode === 'start') marks.segmentStart = candle.startAt;
   if (markMode === 'entry') {
-    marks.entryAt = candle.startAt;
+    const fraction = Math.max(0, Math.min(0.999999, (x - (chartGeometry.left + index * chartGeometry.step)) / chartGeometry.step));
+    marks.entryAt = Math.round(candle.startAt + fraction * (candle.endAt - candle.startAt));
     const boundedY = Math.max(chartGeometry.top, Math.min(chartGeometry.bottom, y));
     marks.entryPrice = chartGeometry.max - ((boundedY - chartGeometry.top) / chartGeometry.plotHeight) * (chartGeometry.max - chartGeometry.min);
     $('entry-price').value = marks.entryPrice.toPrecision(10);
