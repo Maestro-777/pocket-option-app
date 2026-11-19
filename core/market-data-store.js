@@ -31,9 +31,11 @@ function validateCandle(candle) {
 }
 
 class MarketDataStore {
-  constructor(databasePath) {
+  constructor(databasePath, options = {}) {
     if (typeof databasePath !== 'string' || !databasePath.trim()) throw new TypeError('databasePath обязателен');
     this.databasePath = databasePath;
+    this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 1000 : Number(options.maxCandlesPerSeries);
+    if (!Number.isInteger(this.maxCandlesPerSeries) || this.maxCandlesPerSeries < 1 || this.maxCandlesPerSeries > 100_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 100000');
     let DatabaseSync;
     try { ({ DatabaseSync } = require('node:sqlite')); }
     catch (error) { throw new Error('Встроенный SQLite недоступен в Node runtime Electron: ' + String(error?.message || error)); }
@@ -173,6 +175,13 @@ class MarketDataStore {
         is_otc=excluded.is_otc, updated_at=excluded.updated_at
       WHERE excluded.updated_at >= asset_catalog.updated_at
     `);
+    this._pruneCandleSeries = this.db.prepare(`
+      DELETE FROM market_candles
+      WHERE asset=? AND timeframe=? AND start_at NOT IN (
+        SELECT start_at FROM market_candles WHERE asset=? AND timeframe=?
+        ORDER BY start_at DESC LIMIT ?
+      )
+    `);
     this._insertAnalysisDecision = this.db.prepare(`
       INSERT INTO analysis_decisions
       (id,asset,timeframe,decision_at,status,direction,reason,params_json,matches_json,votes_json,average_similarity,query_candles_json,algorithm_version,created_at,historical_json)
@@ -192,10 +201,15 @@ class MarketDataStore {
     let changes = 0;
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      const affectedSeries = new Map();
       for (const candle of validated) {
         const result = this._upsertCandle.run(candle.asset, candle.timeframe, candle.startAt, candle.endAt,
           candle.openAt, candle.closeAt, candle.open, candle.high, candle.low, candle.close, candle.tickCount, updatedAt);
         changes += Number(result.changes || 0);
+        affectedSeries.set(candle.asset + '|' + candle.timeframe, [candle.asset, candle.timeframe]);
+      }
+      for (const [asset, timeframe] of affectedSeries.values()) {
+        this._pruneCandleSeries.run(asset, timeframe, asset, timeframe, this.maxCandlesPerSeries);
       }
       this.db.exec('COMMIT');
       return changes;
@@ -259,7 +273,7 @@ class MarketDataStore {
     }));
   }
 
-  getRecentCandles(limitPerSeries = 1000) {
+  getRecentCandles(limitPerSeries = this.maxCandlesPerSeries) {
     this._assertOpen();
     const limit = Number(limitPerSeries);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new RangeError('limitPerSeries должен быть от 1 до 100000');
@@ -396,7 +410,7 @@ class MarketDataStore {
     return Number(result.changes || 0) > 0;
   }
 
-  pruneCandles(maxCandlesPerSeries = 1000) {
+  pruneCandles(maxCandlesPerSeries = this.maxCandlesPerSeries) {
     this._assertOpen();
     const limit = Number(maxCandlesPerSeries);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 1000000');
