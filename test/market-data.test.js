@@ -22,6 +22,20 @@ test('isolates assets and timeframes', () => {
   assert.deepEqual(hub.getCandles('EURUSD_OTC', 'M5'), []);
 });
 
+test('late ticks update longer timeframes even after short timeframe retention expires', () => {
+  const hub = new MarketDataHub({ timeframes: ['S5', 'M1'], maxCandlesPerSeries: 2 });
+  for (const ts of [1000, 6000, 11000]) {
+    assert.equal(hub.ingest({ asset: 'EURUSD_OTC', ts, price: 1.1 }).accepted, true);
+  }
+  const late = hub.ingest({ asset: 'EURUSD_OTC', ts: 1000, price: 1.2 });
+  assert.equal(late.accepted, true);
+  assert.deepEqual(Object.keys(late.updates), ['M1']);
+  assert.deepEqual(late.rejectedTimeframes, ['S5']);
+  assert.equal(hub.getHealth().partialTicks, 1);
+  assert.equal(hub.getHealth().rejectedTimeframes, 1);
+  assert.equal(hub.getCandles('EURUSD_OTC', 'M1', { includeIncomplete: true })[0].high, 1.2);
+});
+
 test('does not silently evict assets at capacity', () => {
   const hub = new MarketDataHub({ timeframes: ['S5'], maxAssets: 1 });
   assert.equal(hub.ingest({ asset: 'EURUSD_OTC', ts: 1000000, price: 1 }).accepted, true);
