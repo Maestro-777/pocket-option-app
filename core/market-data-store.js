@@ -189,7 +189,7 @@ class MarketDataStore {
         SELECT c.asset,c.timeframe,c.start_at,c.end_at,c.open_at,c.close_at,c.open,c.high,c.low,c.close,c.tick_count,
           ROW_NUMBER() OVER(PARTITION BY c.asset,c.timeframe ORDER BY c.start_at DESC) AS rn
         FROM market_candles c LEFT JOIN asset_catalog a ON a.asset=c.asset
-        WHERE a.is_otc=1 OR c.asset LIKE '%_OTC'
+        WHERE a.is_otc=1 OR substr(c.asset, -4) = '_OTC'
       )
       SELECT asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count
       FROM ranked WHERE rn <= ? ORDER BY asset,timeframe,start_at
