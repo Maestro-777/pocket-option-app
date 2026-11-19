@@ -395,6 +395,7 @@ ipcMain.handle('app:matcher:analyze', async (event, request = {}) => {
     const candles = marketDataService.getCandles(asset, timeframe, { asOf: entryAt, limit: lookback });
     if (candles.length < 2) return { ok: false, reason: 'insufficient_market_data', availableCandles: candles.length };
     const examples = await exampleStore.list({ timeframe });
+    if (request.config != null && (!request.config || typeof request.config !== 'object' || Array.isArray(request.config))) throw new TypeError('config должен быть объектом');
     const decision = analyzeSituation({ candles, timeframe, entryAt, examples, config: request.config || {} });
     const snapshot = { ...decision.settingsSnapshot, asset, timeframe, entryAt, lookback, algorithmVersion: 1 };
     const journal = await decisionJournal.append('DECISION', { asset, ...decision }, snapshot);
@@ -425,6 +426,10 @@ ipcMain.handle('app:analysis:scan-now', async event => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   try { return { ok: true, result: signalScheduler ? await signalScheduler.scan() : null }; }
   catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:get-recent', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  return { ok: true, decisions: signalScheduler ? signalScheduler.getRecentDecisions() : [] };
 });
 
 ipcMain.on('site:balance', (event, payload) => {
@@ -570,7 +575,7 @@ async function runFullCheck(source) {
     const moduleChecks = await moduleManager.healthChecks();
     for (const item of moduleChecks) checks.push(item);
   }
-  checks.push({ name: 'Торговое ядро', ok: true, state: 'not-connected', detail: 'Не подключено в этой сборке: приложение не содержит модуль автоторговли и не совершает сделки' });
+  checks.push({ name: 'Анализ сигналов', ok: !!signalScheduler, state: signalScheduler ? 'active' : 'not-connected', detail: 'Непрерывный анализ OTC работает; автоматическое исполнение сделок ещё не подключено' });
   checks.push({ name: 'Непрерывный анализ OTC', ok: !!(signalScheduler && signalScheduler.getStatus().running), detail: signalScheduler ? JSON.stringify(signalScheduler.getStatus()) : 'Не запущен' });
   checks.push({ name: 'Рыночные данные', ok: true, state: marketDataService.getStatus().connected ? 'connected' : 'waiting', detail: JSON.stringify(marketDataService.getStatus()) });
   const result = { at: new Date().toISOString(), source, passed: checks.every(c => c.ok !== false), checks };
@@ -611,7 +616,8 @@ else app.whenReady().then(async () => {
     onDecision: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item); },
     onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
   });
-  signalScheduler.start();
+  try { signalScheduler.start(); }
+  catch (error) { log('error', 'Сохранённые параметры анализа некорректны; применяем безопасные настройки по умолчанию', String(error)); settings.analysisConfig = {}; signalScheduler.start(); }
   if (settings.showMiniWidget) createMiniWindow().show();
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
