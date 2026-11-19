@@ -110,3 +110,25 @@ test('ignores non-OTC assets and stops pending work on close', async () => {
   assert.equal(decisions.length, 0);
   assert.equal(scanner.getStatus().running, false);
 });
+
+test('restores still-fresh ranked signals from the durable decision journal', () => {
+  const now = Date.now();
+  const previous = {
+    asset: 'EURUSD_OTC', timeframe: 'S5', status: 'SIGNAL', direction: 'UP',
+    decisionAt: now - 1000, averageSimilarity: 91,
+    votes: { UP: 7, DOWN: 1 }, historical: { wins: 5, losses: 1, draws: 0, unknown: 0, winRate: 83.33 },
+    matches: [], queryCandles: [{ startAt: Math.floor((now - 6000) / 5000) * 5000 }]
+  };
+  const scanner = new DecisionScanner({
+    marketDataHub: { getAssets: () => [] },
+    marketDataStore: {
+      createAnalysisDecision: value => value,
+      listManualExamples: () => [],
+      listAnalysisDecisions: () => [previous]
+    },
+    getSettings: () => ({ analysisTimeframes: ['S5'] })
+  });
+  assert.equal(scanner.getStatus().rankedSignals.length, 1);
+  assert.equal(scanner.getStatus().rankedSignals[0].asset, 'EURUSD_OTC');
+  scanner.close();
+});
