@@ -16,8 +16,12 @@ const api = {
   checkUpdates: () => ipcRenderer.invoke('app:update:check'),
   downloadUpdate: () => ipcRenderer.invoke('app:update:download'),
   installUpdate: () => ipcRenderer.invoke('app:update:install'),
+  getMarketDataStatus: () => ipcRenderer.invoke('app:market-data:get-status'),
+  listMarketAssets: options => ipcRenderer.invoke('app:market-data:list-assets', options || {}),
+  getMarketCandles: request => ipcRenderer.invoke('app:market-data:get-candles', request || {}),
   onStatus: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:status', h); return () => ipcRenderer.removeListener('app:status', h); },
   onLog: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:log', h); return () => ipcRenderer.removeListener('app:log', h); },
-  onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); }
+  onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); },
+  onMarketData: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:market-data', h); return () => ipcRenderer.removeListener('app:market-data', h); }
 };
 contextBridge.exposeInMainWorld('pocketApp', api);

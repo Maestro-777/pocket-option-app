@@ -7,6 +7,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataService } = require('./core/market-data');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -37,6 +38,8 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+const marketDataService = new MarketDataService();
+let marketDataPublishTimer = null;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -131,13 +134,27 @@ function toggleWidget() {
   else miniWindow.show();
   refreshTrayMenu(); publishStatus();
 }
+async function injectMarketDataBridge(win) {
+  const debuggerApi = win.webContents.debugger;
+  try {
+    if (!debuggerApi.isAttached()) debuggerApi.attach('1.3');
+    const source = fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
+    await debuggerApi.sendCommand('Page.enable');
+    await debuggerApi.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
+    log('info', 'Перехват рыночных данных установлен до запуска скриптов сайта');
+    return true;
+  } catch (error) {
+    log('error', 'Не удалось установить перехват рыночных данных', String(error));
+    return false;
+  }
+}
 function injectSiteBridge(win) {
   try {
     const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
     win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
   } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
 }
-function launchSite() {
+async function launchSite() {
   if (siteWindow && !siteWindow.isDestroyed()) {
     siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return;
   }
@@ -176,6 +193,8 @@ function launchSite() {
     return { action: 'deny' };
   });
   selectedAccount = 'DEMO';
+  await injectMarketDataBridge(siteWindow);
+  if (!siteWindow || siteWindow.isDestroyed()) return;
   siteWindow.loadURL(ACCOUNT_URLS.DEMO).catch(error => log('error', 'Не удалось открыть Pocket Option', String(error)));
   log('info', 'Пользователь запустил Pocket Option');
   refreshTrayMenu(); publishStatus();
@@ -197,7 +216,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState
+    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus()
   };
 }
 function publishStatus() {
@@ -208,7 +227,7 @@ function publishStatus() {
 }
 
 ipcMain.handle('app:get-status', () => getPublicStatus());
-ipcMain.handle('app:launch-site', () => { launchSite(); return { ok: true }; });
+ipcMain.handle('app:launch-site', async () => { await launchSite(); return { ok: true }; });
 ipcMain.handle('app:show-site', () => {
   if (!siteWindow || siteWindow.isDestroyed()) return { ok: false };
   siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return { ok: true };
@@ -284,6 +303,46 @@ function isTrustedPocketOptionSender(event) {
   try { const host = new URL(siteWindow.webContents.getURL()).hostname; return host === 'pocketoption.com' || host.endsWith('.pocketoption.com'); }
   catch (_) { return false; }
 }
+
+function isTrustedControlSender(event) {
+  return !!(mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents);
+}
+function publishMarketDataStatus() {
+  if (marketDataPublishTimer || !mainWindow || mainWindow.isDestroyed()) return;
+  marketDataPublishTimer = setTimeout(() => {
+    marketDataPublishTimer = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:market-data', marketDataService.getStatus());
+    publishStatus();
+  }, 1000);
+}
+ipcMain.on('site:market-data', (event, payload) => {
+  if (!isTrustedPocketOptionSender(event)) return;
+  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
+  try {
+    const result = marketDataService.ingestEvent(payload.eventName, payload.payload);
+    if (result.accepted > 0) publishMarketDataStatus();
+  } catch (error) { log('warn', 'Некорректное сообщение рыночных данных', String(error)); }
+});
+ipcMain.handle('app:market-data:get-status', event => {
+  if (!isTrustedControlSender(event)) return { connected: false, error: 'untrusted_sender' };
+  return marketDataService.getStatus();
+});
+ipcMain.handle('app:market-data:list-assets', (event, options = {}) => {
+  if (!isTrustedControlSender(event)) return [];
+  return marketDataService.listAssets({ otcOnly: options && options.otcOnly === true });
+});
+ipcMain.handle('app:market-data:get-candles', (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new TypeError('Некорректный запрос');
+    const candles = marketDataService.getCandles(request.asset, request.timeframe, {
+      limit: request.limit == null ? 500 : request.limit,
+      includeIncomplete: request.includeIncomplete === true,
+      asOf: request.asOf
+    });
+    return { ok: true, candles };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
   if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
@@ -435,7 +494,7 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
-  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
+  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
