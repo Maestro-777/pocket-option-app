@@ -55,7 +55,7 @@ Pocket-Option-Background/
 | `renderer/app.js` | Отрисовка состояния, диагностики рыночного потока, действия пользователя, фильтрация журналов |
 | `renderer/widget.html` | Разметка мини-виджета |
 | `renderer/widget.js` | Отображение статуса и действия мини-виджета |
-| `core/market-data.js` | Нормализация и ограниченное in-memory хранение событий/тиков/OHLC по активам |
+| `core/market-data.js` | Нормализация и ограниченное in-memory хранение событий/тиков/OHLC; выдача агрегированных свечей по 10 таймфреймам |
 | `core/ipc-validation.js` | Общие валидаторы URL, баланса и market-data IPC batch |
 | `test/ipc-validation.test.js` | Unit-тесты origin и ограничений IPC payload |
 | `core/timeframes.js` | Агрегация таймфреймов и pre-entry выборка |
