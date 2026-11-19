@@ -138,8 +138,6 @@ class MarketDataStore {
         COMMIT;
       `);
     }
-  }
-
     if (version < 4) {
       this.db.exec(`
         BEGIN IMMEDIATE;
@@ -150,6 +148,8 @@ class MarketDataStore {
         COMMIT;
       `);
     }
+  }
+
   _prepareStatements() {
     this._upsertCandle = this.db.prepare(`
       INSERT INTO market_candles (asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count,updated_at)
