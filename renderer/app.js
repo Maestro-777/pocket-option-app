@@ -169,6 +169,7 @@ $('download-update').addEventListener('click', async () => {
 });
 $('install-update').addEventListener('click', () => api.installUpdate());
 
+if (location.hash === '#annotation') showPage('annotation');
 api.onStatus(renderStatus);
 api.onLog(addLog);
 api.onCheckResult(renderCheck);
