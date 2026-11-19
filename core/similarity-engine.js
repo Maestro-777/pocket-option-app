@@ -14,6 +14,7 @@ const DEFAULTS = Object.freeze({
 const FEATURE_WEIGHTS = Object.freeze([0.25, 0.15, 0.15, 0.15, 0.20, 0.10]);
 
 function validateOptions(options = {}) {
+  if (options == null || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('options должен быть объектом');
   const value = { ...DEFAULTS, ...options };
   for (const key of ['topK', 'minExamples', 'minDirectionVotes', 'lookback', 'maxExamples']) {
     if (!Number.isInteger(value[key])) throw new TypeError(key + ' должен быть целым числом');
@@ -26,7 +27,17 @@ function validateOptions(options = {}) {
   if (!Number.isFinite(value.minSimilarity) || value.minSimilarity < 0 || value.minSimilarity > 100) {
     throw new RangeError('minSimilarity должен быть от 0 до 100');
   }
-  return Object.freeze(value);
+  const result = {
+    topK: value.topK, minSimilarity: value.minSimilarity, minExamples: value.minExamples,
+    minDirectionVotes: value.minDirectionVotes, lookback: value.lookback, maxExamples: value.maxExamples
+  };
+  if (value.analysisTimeframes != null) {
+    if (!Array.isArray(value.analysisTimeframes) || value.analysisTimeframes.length === 0) throw new TypeError('analysisTimeframes должен быть непустым массивом');
+    const selected = [...new Set(value.analysisTimeframes.map(item => String(item).toUpperCase()))];
+    if (selected.some(item => !Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, item))) throw new TypeError('analysisTimeframes содержит неподдерживаемый таймфрейм');
+    result.analysisTimeframes = selected;
+  }
+  return Object.freeze(result);
 }
 
 function validateCandle(candle, timeframe, label) {
