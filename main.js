@@ -518,7 +518,6 @@ ipcMain.on('site:balance', (event, payload) => {
   lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
   lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
 });
-ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
 ipcMain.handle('app:market:assets', event => {
   if (!isTrustedDataWindowSender(event)) return [];
   const liveAssets = marketDataCapture ? marketDataCapture.assetCatalog.listOTC() : [];
