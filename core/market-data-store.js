@@ -2,7 +2,6 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { DatabaseSync } = require('node:sqlite');
 const { TIMEFRAME_MS } = require('./timeframes');
 
 const SCHEMA_VERSION = 1;
@@ -34,6 +33,9 @@ class MarketDataStore {
   constructor(databasePath) {
     if (typeof databasePath !== 'string' || !databasePath.trim()) throw new TypeError('databasePath обязателен');
     this.databasePath = databasePath;
+    let DatabaseSync;
+    try { ({ DatabaseSync } = require('node:sqlite')); }
+    catch (error) { throw new Error('Встроенный SQLite недоступен в Node runtime Electron: ' + String(error?.message || error)); }
     if (databasePath !== ':memory:') fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     this.db = new DatabaseSync(databasePath);
     this.closed = false;
