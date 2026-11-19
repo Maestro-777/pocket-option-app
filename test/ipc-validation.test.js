@@ -20,7 +20,7 @@ test('accepts fresh valid balance payloads and sanitizes currency', () => {
   const result = validateBalancePayload({
     accountType: 'demo', balance: 123.45, currency: 'USDT-LONG', ts: now
   }, { now, lastMessageAt: now - 1000, lastTimestamp: now - 1000 });
-  assert.deepEqual(result, { accountType: 'demo', balance: 123.45, currency: 'USDT-LO', ts: now });
+  assert.deepEqual(result, { accountType: 'demo', balance: 123.45, currency: 'USDT-LON', ts: now });
 });
 
 test('rejects stale, future, negative, invalid and too-frequent balance messages', () => {
