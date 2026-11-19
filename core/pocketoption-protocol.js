@@ -179,7 +179,7 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
       accountMode: accountRaw.includes('DEMO') ? 'DEMO' : accountRaw.includes('REAL') ? 'REAL' : 'UNKNOWN',
       amount, profit, result,
       entryAt: toMilliseconds(deal.openTime ?? deal.open_time ?? deal.createdAt ?? deal.created_at),
-      closedAt,
+      closedAt: toMilliseconds(deal.closeTime ?? deal.close_time ?? deal.closedAt ?? deal.closed_at) || closedAt,
       expirySeconds: finiteNumber(deal.expirySeconds ?? deal.expiration ?? deal.expiry),
       payoutRate: finiteNumber(deal.percentProfit ?? deal.payout ?? deal.payoutRate),
       balanceAfter: balanceValue,
