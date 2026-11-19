@@ -93,6 +93,36 @@ function createMainWindow() {
   });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
+function createLabelerWindow() {
+  if (labelerWindow && !labelerWindow.isDestroyed()) {
+    labelerWindow.show();
+    labelerWindow.focus();
+    return labelerWindow;
+  }
+  labelerWindow = new BrowserWindow({
+    width: 1440, height: 920, minWidth: 1040, minHeight: 720,
+    show: false, title: 'Разметка исторических OTC-ситуаций',
+    backgroundColor: '#0b1020', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  labelerWindow.loadFile(path.join(__dirname, 'renderer', 'labeler.html'));
+  labelerWindow.once('ready-to-show', () => labelerWindow && labelerWindow.show());
+  labelerWindow.on('closed', () => { labelerWindow = null; });
+  return labelerWindow;
+}
+
+function isTrustedDataWindowSender(event) {
+  const sender = event?.sender;
+  if (!sender) return false;
+  const allowed = (mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents) ||
+    (labelerWindow && !labelerWindow.isDestroyed() && sender === labelerWindow.webContents);
+  if (!allowed) return false;
+  try {
+    const url = new URL(event.senderFrame?.url || sender.getURL());
+    return url.protocol === 'file:';
+  } catch (_) { return false; }
+}
+
 function createMiniWindow() {
   if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
   miniWindow = new BrowserWindow({
@@ -307,6 +337,11 @@ function publishStatus() {
 
 ipcMain.handle('app:get-status', () => getPublicStatus());
 ipcMain.handle('app:launch-site', () => { launchSite(); return { ok: true }; });
+ipcMain.handle('app:labeler:open', event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, reason: 'Недоверенный отправитель' };
+  createLabelerWindow();
+  return { ok: true };
+});
 ipcMain.handle('app:show-site', () => {
   if (!siteWindow || siteWindow.isDestroyed()) return { ok: false };
   siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return { ok: true };
@@ -390,6 +425,41 @@ ipcMain.on('site:balance', (event, payload) => {
   lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
+ipcMain.handle('app:market:assets', event => {
+  if (!isTrustedDataWindowSender(event)) return [];
+  if (marketDataCapture) return marketDataCapture.assetCatalog.listOTC();
+  return marketDataStore ? marketDataStore.listCatalog({ otcOnly: true }) : [];
+});
+ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const symbol = String(asset || '').trim().toUpperCase();
+  if (!symbol.endsWith('_OTC')) throw new TypeError('Разметка разрешена только для OTC-активов');
+  return marketDataStore.getCandles(symbol, timeframe, { limit: Math.min(300, Math.max(1, Number(options?.limit) || 300)), fromAt: options?.fromAt, toAt: options?.toAt });
+});
+ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  return marketDataStore.listManualExamples(filters);
+});
+ipcMain.handle('app:manual-examples:create', (event, example) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const saved = marketDataStore.createManualExample(example);
+  log('info', 'Сохранён ручной исторический пример', { id: saved.id, asset: saved.asset, timeframe: saved.timeframe, direction: saved.direction });
+  return saved;
+});
+ipcMain.handle('app:manual-examples:update', (event, id, changes) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  return marketDataStore.updateManualExample(id, changes);
+});
+ipcMain.handle('app:manual-examples:delete', (event, id) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  return { deleted: marketDataStore.deleteManualExample(id) };
+});
+
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
 ipcMain.handle('app:logs:read', () => {
   try { return fs.readFileSync(logFile(), 'utf8').split(/\r?\n/).filter(Boolean).slice(-1000).map(line => { try { return JSON.parse(line); } catch (_) { return { message: line }; } }); }
