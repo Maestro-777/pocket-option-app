@@ -1,6 +1,6 @@
 'use strict';
-const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
-const {TradeExecutionAdapter}=require('../core/trade-execution'),{TradingGate}=require('../core/trading-gate');
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os');
+const {TradeExecutionAdapter}=require('../core/trade-execution'),{TradingGate}=require('../core/trading-gate'),{TradeLedger}=require('../core/trade-ledger');
 function signal(asset='EURUSD_OTC',id='signal-1'){return{signalId:id,asset,timeframe:'S5',decision:{accepted:true,direction:'UP',averageSimilarity:90,matches:[]}};}
 function setup(overrides={}){
  const gate=overrides.gate||new TradingGate(),events=[],settings={autoTradingEnabled:true,baseBet:1,defaultExpirySeconds:15,analysisConfig:{maxOpenTrades:2},...(overrides.settings||{})};
@@ -35,3 +35,5 @@ test('pause cancels an in-flight page command and waits for it to settle',async(
 test('does not close or classify a trade when broker close event omits profit',async()=>{const{adapter,gate}=setup();await adapter.execute(signal());const result=await adapter.handleCloseEvent({deals:[{asset:'EURUSD_otc',amount:1,id:'close-no-profit'}]});assert.equal(result[0].matched,false);assert.equal(result[0].reason,'missing_or_invalid_profit');assert.equal(gate.getState().openTrades,1);});
 
 test('treats zero broker profit as a lost stake, matching Pocket Option extension semantics',async()=>{const{adapter,gate}=setup();await adapter.execute(signal());const result=await adapter.handleCloseEvent({deals:[{asset:'EURUSD_otc',amount:1,profit:0,id:'zero-profit'}]});assert.equal(result[0].outcome,'LOSS');assert.equal(result[0].profit,-1);assert.equal(gate.getState().openTrades,0);});
+
+test('stores only a balance snapshot explicitly included in the broker close event',async()=>{const dir=await fs.mkdtemp(path.join(os.tmpdir(),'po-close-balance-'));try{const ledger=new TradeLedger(path.join(dir,'trades.json'));await ledger.load();const{adapter}=setup({ledger});await adapter.execute(signal());await adapter.handleCloseEvent([{balance:101.25,deals:[{asset:'EURUSD_otc',amount:1,profit:0.8,id:'balance-close'}]}]);assert.equal(ledger.listClosed()[0].balanceAfter,101.25);assert.equal(ledger.getStats().balanceCurve[0].balance,101.25);}finally{await fs.rm(dir,{recursive:true,force:true});}});
