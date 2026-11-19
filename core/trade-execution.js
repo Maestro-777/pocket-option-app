@@ -92,7 +92,7 @@ class TradeExecutionAdapter{
   }
   return results;
  }
- async cancelInFlight(){const current=this.inFlight;if(!current)return false;try{await current.win.webContents.executeJavaScript('window.__PT_CANCEL_TRADE_COMMAND__('+JSON.stringify(current.tradeId)+')',true);return true;}catch(_){return false;}}
+ async cancelInFlight(){const current=this.inFlight;let sent=false;if(current){try{await current.win.webContents.executeJavaScript('window.__PT_CANCEL_TRADE_COMMAND__('+JSON.stringify(current.tradeId)+')',true);sent=true;}catch(_){}}await this.executionQueue;return sent;}
  async resolveUnknown(tradeId,action,profitValue){
   const id=String(tradeId),trade=this.submitted.get(id);if(!trade)return{ok:false,reason:'trade_not_found'};
   if(action==='not_opened'){
