@@ -201,6 +201,23 @@ class MarketDataStore {
     }));
   }
 
+  pruneCandles(maxCandlesPerSeries = 300) {
+    this._assertOpen();
+    const limit = Number(maxCandlesPerSeries);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 1000000');
+    const result = this.db.prepare(`
+      DELETE FROM market_candles
+      WHERE (asset,timeframe,start_at) IN (
+        SELECT asset,timeframe,start_at FROM (
+          SELECT asset,timeframe,start_at,
+            ROW_NUMBER() OVER(PARTITION BY asset,timeframe ORDER BY start_at DESC) AS rn
+          FROM market_candles
+        ) WHERE rn > ?
+      )
+    `).run(limit);
+    return Number(result.changes || 0);
+  }
+
   listCatalog(options = {}) {
     this._assertOpen();
     const rows = options.otcOnly === true
