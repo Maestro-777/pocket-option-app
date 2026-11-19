@@ -20,3 +20,14 @@ test('persists submission before execution and restores correlation after restar
 test('serializes multi-pair submissions and blocks concurrency until close correlation is verified',async()=>{const{adapter}=setup();assert.equal((await adapter.execute(signal('EURUSD_OTC','one'))).ok,true);const second=await adapter.execute(signal('GBPUSD_OTC','two'));assert.equal(second.ok,false);assert.equal(second.reason,'multi_trade_correlation_not_verified');});
 
 test('allows explicit reconciliation of a recovered submission that was never opened',async()=>{const{adapter,gate}=setup();await adapter.execute(signal('EURUSD_OTC','recover-me'));const result=await adapter.resolveUnknown('recover-me','not_opened');assert.equal(result.ok,true);assert.equal(gate.getState().openTrades,0);assert.equal(adapter.getState().pendingOrSubmitted,0);});
+
+test('pause cancels an in-flight page command and waits for it to settle',async()=>{
+ const gate=new TradingGate(),startedResolve={};let cancel;
+ const started=new Promise(resolve=>{startedResolve.resolve=resolve;});
+ const{adapter}=setup({gate,executeJavaScript:code=>{
+  if(code.includes('__PT_TRADE_COMMAND__')){startedResolve.resolve();return new Promise(resolve=>{cancel=()=>resolve({ok:false,reason:'cancelled_by_pause'});});}
+  if(code.includes('__PT_CANCEL_TRADE_COMMAND__')){if(cancel)cancel();return Promise.resolve(true);}
+  return Promise.resolve(true);
+ }});
+ const pending=adapter.execute(signal('EURUSD_OTC','pause-test'));await started;gate.setPaused(true);await adapter.cancelInFlight();const result=await pending;assert.equal(result.ok,false);assert.equal(result.reason,'cancelled_by_pause');assert.equal(gate.getState().openTrades,0);assert.equal(gate.getState().pendingReservations,0);
+});
