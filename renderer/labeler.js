@@ -544,7 +544,7 @@ $('cancel-edit').addEventListener('click', resetForm);
 $('reload-chart').addEventListener('click', loadChart);
 $('refresh-all').addEventListener('click', reloadAll);
 $('asset-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); await loadDecisionJournal(); });
-$('timeframe-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); });
+$('timeframe-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); await loadDecisionJournal(); });
 $('open-site').addEventListener('click', async () => {
   const result = await api.launchSite();
   setStatus(result?.ok ? 'Pocket Option открывается' : 'Не удалось открыть Pocket Option', !result?.ok);
