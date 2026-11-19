@@ -1,7 +1,7 @@
 # Тестирование и подтверждение
 
 ## Статус
-Ветка реализации содержит новые unit-тесты, но тесты/сборка считаются пройденными только после успешного GitHub Actions run для актуального HEAD commit. Результаты более ранних commit не распространяются автоматически на последующие изменения.
+Автоматическая проверка кода на commit `9f9e6fafcc0b8559bd14c2c76d059bae006183bb` в ветке `work/pattern-engine-foundation` завершилась успешно. После этого commit были проверены совпадающие SHA основных runtime-файлов (main.js, market-data-bridge.js, trade-execution.js, trade-ledger.js, signal-scheduler.js, package.json). Документационные обновления не меняют исполняемый код.
 
 ## Автоматизированные тесты
 - `node:test` покрывает timeframes, market data/tick aggregation, OHLC store, pattern normalization, matcher/look-ahead, example store, signal scheduler, decision journal, market-data bridge, trading gate, DEMO execution adapter и TradeLedger.
@@ -18,7 +18,7 @@
 - [x] ScanStateStore и восстановление dedup баров добавлены в unit tests.
 
 ## Не подтверждено runtime
-- [ ] Актуальный CI run для HEAD commit: `npm run check`, `npm test`, Windows x64 build.
+- [x] GitHub Actions run `44607178193` для commit `9f9e6fafcc0b8559bd14c2c76d059bae006183bb`: `npm run check` успешно, `npm test` — 65 passed / 0 failed, Windows installer build — успешно.
 - [ ] CDP attach/injection на живой странице Pocket Option.
 - [ ] Реальный одновременный updateStream нескольких OTC-пар.
 - [ ] Исторические свечи по всем десяти таймфреймам и нескольким парам.
@@ -31,3 +31,12 @@
 
 ## Протокол
 Для каждого изменения фиксировать актуальный commit, workflow run, среду, команду/сценарий, результат и непроверенные пункты. Не считать тест пройденным только по наличию тестового файла или по результату предыдущего commit.
+
+## Последний автоматический прогон
+- Branch: `work/pattern-engine-foundation`
+- Commit: `9f9e6fafcc0b8559bd14c2c76d059bae006183bb`
+- Workflow run: `44607178193` — success
+- Unit tests: 65/65 passed
+- JavaScript syntax: passed
+- Windows installer build: passed
+- Live Pocket Option DEMO smoke test: не проводился; это остаётся обязательным runtime этапом.
