@@ -41,7 +41,7 @@ class TradeExecutionAdapter{
    return this._reject(signal,'site_window_unavailable');
   }
   const tradeId=String(signal.signalId),submittedAt=Date.now();
-  if(this.ledger){try{await this.ledger.addPending({tradeId,signalId:tradeId,pair:asset,timeframe:String(signal.timeframe),direction:signal.decision.direction,amount,expirySeconds,accountMode:'DEMO',submittedAt,status:'PREPARING'});}catch(error){await this.gate.cancelReservation(reservation.reservation.reservationId,'ledger_write_failed');return this._reject(signal,'ledger_write_failed',{message:String(error.message||error)});}}
+  if(this.ledger){try{await this.ledger.addPending({tradeId,signalId:tradeId,pair:asset,timeframe:String(signal.timeframe),direction:signal.decision.direction,amount,expirySeconds,similarity:Number(signal.decision.averageSimilarity||0),matchCount:Number(signal.decision.matchCount||0),upVotes:Number(signal.decision.upVotes||0),downVotes:Number(signal.decision.downVotes||0),accountMode:'DEMO',submittedAt,status:'PREPARING'});}catch(error){await this.gate.cancelReservation(reservation.reservation.reservationId,'ledger_write_failed');return this._reject(signal,'ledger_write_failed',{message:String(error.message||error)});}}
   const request={version:1,asset,rawAsset:assetInfo.rawSymbol,direction:signal.decision.direction,amount,expirySeconds,switchTimeoutMs:6000};
   let result;
   try{
