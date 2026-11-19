@@ -9,6 +9,7 @@
   let selection = { start: null, end: null, entry: null };
   let editingId = null;
   let liveDecisions = [];
+  let tradingState = null;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -17,6 +18,56 @@
   function selectedTimeframe() { return $('annotation-timeframe').value; }
   function say(message) { $('annotation-save-status').textContent = message; }
 
+
+
+  async function loadTradingState() {
+    const result = await api.getTradingState();
+    if (!result || !result.ok) { $('trading-state').textContent = result?.reason || 'Не удалось получить состояние торговли'; return; }
+    tradingState = result;
+    $('trading-base-bet').value = result.config.baseBet;
+    $('trading-expiry').value = result.config.defaultExpirySeconds;
+    const paused = !result.enabled || result.gate.paused;
+    $('trading-badge').textContent = !result.enabled ? 'ВЫКЛЮЧЕНА' : (result.gate.paused ? 'ПАУЗА' : 'DEMO АКТИВНА');
+    $('trading-badge').className = 'status-pill ' + (result.enabled && !result.gate.paused ? 'active' : '');
+    $('trading-enable').textContent = result.enabled ? 'Выключить автоторговлю' : 'Включить DEMO автоторговлю';
+    $('trading-enable').disabled = !result.ledgerHealthy;
+    $('trading-pause').disabled = !result.enabled;
+    $('trading-pause').textContent = result.gate.paused ? 'Продолжить торговлю' : 'Пауза';
+    const account = result.account || {};
+    $('trading-state').textContent = 'Обнаруженный счёт: ' + (account.detected || 'не определён') +
+      ' · выбранный режим: ' + (account.selected || '—') + ' · баланс: ' + (account.balance == null ? '—' : account.balance) +
+      ' · активных/неподтверждённых сделок: ' + result.gate.openTrades +
+      (result.ledgerHealthy ? '' : ' · ОШИБКА ЖУРНАЛА СДЕЛОК: автоторговля заблокирована');
+    const stats = result.stats || {};
+    $('trading-stats').innerHTML = '<span>Закрыто: ' + Number(stats.total || 0) + '</span><span>WIN: ' + Number(stats.wins || 0) +
+      '</span><span>LOSS: ' + Number(stats.losses || 0) + '</span><span>DRAW: ' + Number(stats.draws || 0) +
+      '</span><span>Win rate: ' + Number(stats.winRate || 0).toFixed(1) + '%</span><span>Чистый результат: ' + Number(stats.netProfit || 0).toFixed(2) + '</span>';
+    const open = result.openTrades || [];
+    $('trading-open-list').innerHTML = open.length ? open.map(t =>
+      '<div class="log-entry"><b>' + esc(t.pair) + '</b><span>' + esc(t.timeframe) + '</span><span>' + esc(t.direction) +
+      '</span><span>' + Number(t.amount).toFixed(2) + '</span><span>' + esc(t.status) + '</span><small>' +
+      esc(new Date(t.submittedAt).toLocaleString('ru-RU')) + '</small></div>'
+    ).join('') : '<div class="empty">Открытых или ожидающих сделок нет</div>';
+  }
+
+  async function saveTradingConfig() {
+    const result = await api.setTradingConfig({baseBet:Number($('trading-base-bet').value),defaultExpirySeconds:Number($('trading-expiry').value)});
+    $('trading-state').textContent = result && result.ok ? 'Параметры сделки сохранены.' : (result?.reason || 'Не удалось сохранить параметры');
+    if (result && result.ok) await loadTradingState();
+  }
+
+  async function toggleTrading() {
+    const result = await api.setTradingEnabled(!(tradingState && tradingState.enabled));
+    if (!result || !result.ok) $('trading-state').textContent = result?.reason || 'Не удалось изменить режим автоторговли';
+    await loadTradingState();
+  }
+
+  async function toggleTradingPause() {
+    if (!tradingState || !tradingState.enabled) return;
+    const result = await api.setTradingPaused(!tradingState.gate.paused);
+    if (!result || !result.ok) $('trading-state').textContent = result?.reason || 'Не удалось изменить паузу';
+    await loadTradingState();
+  }
 
   async function loadAnalysisConfig() {
     const result = await api.getAnalysisConfig();
@@ -301,6 +352,9 @@
     $('annotation-analysis-result').innerHTML = header + (rows || '<div class="empty">Подходящих примеров не найдено</div>');
   }
 
+  $('trading-save-config').addEventListener('click', () => saveTradingConfig().catch(e => { $('trading-state').textContent = String(e.message || e); }));
+  $('trading-enable').addEventListener('click', () => toggleTrading().catch(e => { $('trading-state').textContent = String(e.message || e); }));
+  $('trading-pause').addEventListener('click', () => toggleTradingPause().catch(e => { $('trading-state').textContent = String(e.message || e); }));
   $('analysis-save').addEventListener('click', () => saveAnalysisConfig().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('analysis-scan-now').addEventListener('click', () => scanNow().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('annotation-load').addEventListener('click', () => loadCandles().catch(e => say(String(e.message || e))));
@@ -333,11 +387,14 @@
     await loadAssets();
     await refreshExamples();
     await loadAnalysisConfig();
+    await loadTradingState();
   });
   api.onSignalDecision(item => { liveDecisions = [item].concat(liveDecisions.filter(x => x.signalId !== item.signalId)).slice(0,100); renderLiveDecisions(); });
+  api.onTradeUpdate(() => loadTradingState().catch(() => {}));
   api.onMarketData(() => {
     if ($('page-annotation').classList.contains('active') && !selectedAsset()) loadAssets();
   });
   loadAssets().catch(() => {});
   loadRecentDecisions().catch(() => {});
+  loadTradingState().catch(() => {});
 })();
