@@ -613,7 +613,7 @@ class MarketDataStore {
     const entryAt = input.entryAt == null ? null : Number(input.entryAt);
     if (entryAt != null && (!Number.isSafeInteger(entryAt) || entryAt <= 0 || entryAt > closedAt)) throw new TypeError('Некорректное время открытия сделки');
     const expiryValue = input.expirySeconds == null ? null : Number(input.expirySeconds);
-    const expirySeconds = expiryValue == null ? null : Math.round(expiryValue);
+    const expirySeconds = expiryValue == null ? null : expiryValue;
     if (expirySeconds != null && (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400)) throw new TypeError('Некорректная экспирация сделки');
     const payoutRate = input.payoutRate == null ? null : Number(input.payoutRate);
     if (payoutRate != null && (!Number.isFinite(payoutRate) || payoutRate < 0 || payoutRate > 1000)) throw new TypeError('Некорректный payout');
