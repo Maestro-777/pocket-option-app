@@ -16,6 +16,12 @@ function isAllowedPocketOptionUrl(rawUrl) {
   }
 }
 
+function isTrustedPocketOptionFrame(event, expectedSender, fallbackUrl) {
+  if (!event || !expectedSender || event.sender !== expectedSender) return false;
+  const frameUrl = event.senderFrame?.url || fallbackUrl;
+  return isAllowedPocketOptionUrl(frameUrl);
+}
+
 function validateBalancePayload(payload, options = {}) {
   const now = Number.isFinite(options.now) ? options.now : Date.now();
   const lastMessageAt = Number(options.lastMessageAt) || 0;
@@ -79,6 +85,7 @@ module.exports = {
   MAX_BATCH_BYTES,
   MAX_EVENT_BYTES,
   isAllowedPocketOptionUrl,
+  isTrustedPocketOptionFrame,
   validateBalancePayload,
   validateMarketBatch
 };
