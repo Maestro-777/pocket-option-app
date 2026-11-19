@@ -63,7 +63,9 @@ function extractFeatures(candles, timeframe) {
   if (!Array.isArray(candles) || candles.length < 3) throw new TypeError('Для сравнения нужны минимум 3 свечи');
   const normalized = candles.map(candle => validateCandle(candle, timeframe, 'Входные данные'));
   for (let i = 1; i < normalized.length; i++) {
-    if (normalized[i].startAt <= normalized[i - 1].startAt) throw new TypeError('Свечи должны идти строго по времени');
+    if (normalized[i].startAt !== normalized[i - 1].startAt + TIMEFRAME_MS[timeframe]) {
+      throw new TypeError('В последовательности свечей есть пропуск или нарушение хронологии');
+    }
   }
 
   const ranges = normalized.map(c => (c.high - c.low) / c.open);
@@ -176,7 +178,14 @@ function analyzeSimilarity(input) {
   });
   if (queryWindow.some(candle => candle.asset !== queryWindow[0].asset)) throw new TypeError('В запросе смешаны разные OTC-пары');
   for (let i = 1; i < queryWindow.length; i++) {
-    if (queryWindow[i].startAt <= queryWindow[i - 1].startAt) throw new TypeError('Текущие свечи должны идти строго по времени');
+    if (queryWindow[i].startAt !== queryWindow[i - 1].startAt + TIMEFRAME_MS[timeframe]) {
+      return {
+        status: 'NO_SIGNAL', direction: 'NONE', reason: 'gaps_in_live_history',
+        timeframe, entryAt, options, matches: [], qualifiedMatches: [],
+        votes: { UP: 0, DOWN: 0 }, averageSimilarity: null,
+        historical: { wins: 0, losses: 0, draws: 0, unknown: 0, winRate: null }
+      };
+    }
   }
   const queryFeatures = extractFeatures(queryWindow, timeframe);
 
