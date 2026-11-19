@@ -92,3 +92,6 @@ textarea{resize:vertical}
 .trade-stat-line b{font-weight:650;text-align:right;color:#dbe7f6}
 .trade-result-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;color:#d7e2f3}
 @media(max-width:900px){.trade-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.trade-stats-breakdown{grid-template-columns:1fr}}
+
+.trade-period-tools{display:flex;align-items:center;gap:8px}
+.trade-period-tools select{max-width:110px;background:#0e1728;color:#d7e2f3;border:1px solid #31445f;border-radius:6px;padding:5px;font-size:11px}
