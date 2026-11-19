@@ -134,7 +134,7 @@ function prepareExamples(examples, timeframe, options = {}) {
     const direction = String(example.direction || '').toUpperCase();
     const asset = String(example.asset || '').toUpperCase();
     if (!['UP', 'DOWN'].includes(direction) || !asset.endsWith('_OTC')) { skipped++; continue; }
-    if (!Array.isArray(example.inputCandles) || example.inputCandles.length < 3) { skipped++; continue; }
+    if (!Array.isArray(example.inputCandles) || example.inputCandles.length < config.lookback) { skipped++; continue; }
     try {
       const sample = example.inputCandles.slice(-config.lookback).map(candle => {
         const normalized = validateCandle(candle, timeframe, 'Исторический пример');
