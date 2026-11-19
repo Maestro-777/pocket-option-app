@@ -46,8 +46,8 @@ test('does not click when the requested asset is not confirmed in the DOM',async
 
 test('forwards only allowlisted fields from closed-trade events',()=>{
  const {window,messages}=setup(),ws=new window.WebSocket('wss://market.invalid');
- ws.emit('42["successcloseOrder",{"deals":[{"id":"broker-1","asset":"EURUSD_otc","amount":1,"profit":0.8,"direction":"call","password":"must-not-pass"}]}]');
- assert.equal(messages.length,1);assert.equal(messages[0].data.eventName,'successcloseOrder');
+ ws.emit('42["successcloseOrder",{"balance":100.5,"deals":[{"id":"broker-1","asset":"EURUSD_otc","amount":1,"profit":0.8,"direction":"call","password":"must-not-pass"}]}]');
+ assert.equal(messages.length,1);assert.equal(messages[0].data.eventName,'successcloseOrder');assert.equal(messages[0].data.payload[0].balance,100.5);
  const deal=messages[0].data.payload[0].deals[0];assert.equal(deal.id,'broker-1');assert.equal(deal.asset,'EURUSD_otc');assert.equal(deal.profit,0.8);assert.equal(deal.password,undefined);
 });
 
