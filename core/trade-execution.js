@@ -79,8 +79,8 @@ class TradeExecutionAdapter{
     if(this.ledger)await this.ledger.recordUnmatchedClose({...unmatched,reason:unmatched.reason}).catch(()=>{});try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}
     results.push(unmatched);continue;
    }
-   const trade=candidates[0],profit=Number(deal.profit??deal.netProfit??0);
-   if(!Number.isFinite(profit)){results.push({matched:false,reason:'invalid_profit',tradeId:trade.tradeId});continue;}
+   const trade=candidates[0],rawProfit=deal.profit??deal.netProfit,profit=Number(rawProfit);
+   if(rawProfit==null||!Number.isFinite(profit)){const unmatched={matched:false,reason:'missing_or_invalid_profit',tradeId:trade.tradeId,asset:asset||null,amount:Number.isFinite(amount)?amount:null,profit:null};if(this.ledger)await this.ledger.recordUnmatchedClose(unmatched).catch(()=>{});try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}results.push(unmatched);continue;}
    const outcome=profit>0?'WIN':profit<0?'LOSS':'DRAW';
    if(asset)this.correlationVerified=true;
    const closed=await this.gate.closeTrade(trade.tradeId,{outcome});
