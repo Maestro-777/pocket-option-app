@@ -49,3 +49,14 @@ test('parses object-shaped stream rows only when timestamp is explicit', () => {
   assert.equal(ticks.length, 3);
   assert.equal(ticks[2].asset, 'AUDUSD_otc');
 });
+
+test('uses receive time for documented live tick shapes without timestamps', () => {
+  const receivedAt = 1700000000123;
+  const ticks = normalizeStreamTicks('updateStream', [
+    ['EURUSD_otc', 0, 1.2],
+    { asset: 'GBPUSD_otc', price: 1.3 },
+    { asset: 'AUDUSD_otc', prices: [{ price: 1.4 }] }
+  ], receivedAt);
+  assert.equal(ticks.length, 3);
+  assert.ok(ticks.every(tick => tick.ts === receivedAt));
+});
