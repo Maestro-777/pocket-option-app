@@ -724,6 +724,7 @@ class MarketDataStore {
       otcCatalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog WHERE is_otc=1').get().count),
       manualExamples: Number(this.db.prepare('SELECT COUNT(*) AS count FROM manual_examples').get().count),
       analysisDecisions: Number(this.db.prepare('SELECT COUNT(*) AS count FROM analysis_decisions').get().count),
+      tradeResults: Number(this.db.prepare('SELECT COUNT(*) AS count FROM trade_results').get().count),
       schemaVersion: SCHEMA_VERSION
     };
   }
