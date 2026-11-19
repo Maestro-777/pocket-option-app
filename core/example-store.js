@@ -12,14 +12,15 @@ function validateExample(input){
   const direction=String(input.direction||'').toUpperCase();if(!DIRECTIONS.has(direction))throw new TypeError('Направление должно быть UP или DOWN');
   const expirySeconds=Number(input.expirySeconds);if(!Number.isFinite(expirySeconds)||expirySeconds<=0||expirySeconds>86400)throw new RangeError('Экспирация должна быть от 1 до 86400 секунд');
   const preEntryCandles=validateCandles(input.preEntryCandles,{timeframe,entryAt});if(preEntryCandles.length>10000)throw new RangeError('Слишком много свечей');
-  const outcomeCandles=input.outcomeCandles==null?[]:input.outcomeCandles;if(!Array.isArray(outcomeCandles))throw new TypeError('outcomeCandles должен быть массивом');
+  const outcomeCandles=input.outcomeCandles==null?[]:input.outcomeCandles;if(!Array.isArray(outcomeCandles))throw new TypeError('outcomeCandles должен быть массивом');if(outcomeCandles.length>10000)throw new RangeError('Слишком много пост-входовых свечей');
+  const outcome=String(input.outcome||'UNKNOWN').toUpperCase();if(!['WIN','LOSS','DRAW','UNKNOWN'].includes(outcome))throw new TypeError('outcome должен быть WIN, LOSS, DRAW или UNKNOWN');
   let previousEnd=entryAt;const duration=getTimeframeDuration(timeframe);
   for(let i=0;i<outcomeCandles.length;i++){const c=outcomeCandles[i];if(!c||typeof c!=='object')throw new TypeError('Некорректная пост-входовая свеча');
     const start=Number(c.startAt),end=Number(c.endAt),o=Number(c.open),h=Number(c.high),l=Number(c.low),cl=Number(c.close);
     if(![start,end,o,h,l,cl].every(Number.isFinite)||start<entryAt||end<=start||end-start!==duration||start<previousEnd||c.complete!==true||o<=0||h<=0||l<=0||cl<=0||h<Math.max(o,cl,l)||l>Math.min(o,cl,h))throw new RangeError('Некорректная пост-входовая свеча: ожидаются закрытые OHLC-свечи после точки входа');
     previousEnd=end;
   }
-  return {id:input.id?String(input.id):crypto.randomUUID(),pair,timeframe,startAt,endAt,entryAt,direction,expirySeconds,preEntryCandles,outcomeCandles:outcomeCandles.map(c=>({...c})),createdAt:input.createdAt?String(input.createdAt):new Date().toISOString(),updatedAt:new Date().toISOString()};
+  return {id:input.id?String(input.id):crypto.randomUUID(),pair,timeframe,startAt,endAt,entryAt,direction,expirySeconds,outcome,preEntryCandles,outcomeCandles:outcomeCandles.map(c=>({...c})),createdAt:input.createdAt?String(input.createdAt):new Date().toISOString(),updatedAt:new Date().toISOString()};
 }
 class ExampleStore{
   constructor(filePath){if(!filePath||typeof filePath!=='string')throw new TypeError('Не указан путь к хранилищу');this.filePath=path.resolve(filePath);this.queue=Promise.resolve();this.cache=null;}
