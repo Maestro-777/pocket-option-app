@@ -8,6 +8,7 @@
   let mode = 'start';
   let selection = { start: null, end: null, entry: null };
   let editingId = null;
+  let liveDecisions = [];
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,6 +16,75 @@
   function selectedAsset() { return $('annotation-pair').value; }
   function selectedTimeframe() { return $('annotation-timeframe').value; }
   function say(message) { $('annotation-save-status').textContent = message; }
+
+
+  async function loadAnalysisConfig() {
+    const result = await api.getAnalysisConfig();
+    if (!result || !result.ok) { $('analysis-monitor-status').textContent = result?.reason || 'Не удалось получить параметры анализа'; return; }
+    const config = result.config;
+    const selected = new Set(config.timeframes || []);
+    Array.from($('analysis-timeframes').options).forEach(option => { option.selected = selected.has(option.value); });
+    $('analysis-lookback').value = config.lookback;
+    $('analysis-interval').value = config.scanIntervalMs;
+    $('analysis-max-candidates').value = config.maxOpenTrades;
+    $('matcher-topk').value = config.matcher.topK;
+    $('matcher-threshold').value = config.matcher.similarityThreshold;
+    $('matcher-min-examples').value = config.matcher.minExamples;
+    $('matcher-min-votes').value = config.matcher.minDirectionalMatches;
+    $('matcher-pattern-length').value = config.matcher.patternLength;
+    $('analysis-monitor-status').textContent = 'Непрерывный анализ включён · таймфреймы: ' + config.timeframes.join(', ') +
+      ' · окно: ' + config.lookback + ' свечей · период: ' + config.scanIntervalMs + ' мс';
+    await loadRecentDecisions();
+  }
+
+  async function saveAnalysisConfig() {
+    const timeframes = Array.from($('analysis-timeframes').selectedOptions).map(option => option.value);
+    const config = {
+      enabled: true, timeframes,
+      lookback: Number($('analysis-lookback').value),
+      scanIntervalMs: Number($('analysis-interval').value),
+      maxOpenTrades: Number($('analysis-max-candidates').value),
+      matcher: {
+        topK: Number($('matcher-topk').value),
+        similarityThreshold: Number($('matcher-threshold').value),
+        minExamples: Number($('matcher-min-examples').value),
+        minDirectionalMatches: Number($('matcher-min-votes').value),
+        patternLength: Number($('matcher-pattern-length').value)
+      }
+    };
+    const result = await api.setAnalysisConfig(config);
+    if (!result || !result.ok) { $('analysis-monitor-status').textContent = result?.reason || 'Не удалось сохранить настройки'; return; }
+    $('analysis-monitor-status').textContent = 'Параметры сохранены. Непрерывный анализ перезапущен.';
+  }
+
+  function renderLiveDecisions() {
+    const host = $('live-signals');
+    if (!liveDecisions.length) { host.innerHTML = '<div class="empty">Ожидание новых закрытых свечей</div>'; return; }
+    host.innerHTML = liveDecisions.slice(0,100).map(item => {
+      const d = item.decision || {};
+      const accepted = d.accepted === true;
+      const direction = accepted ? (d.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : (d.reason || 'нет сигнала');
+      const rank = item.rank ? '№' + item.rank + (item.withinConfiguredLimit ? ' · в лимите' : '') : 'не ранжирован';
+      return '<div class="log-entry"><span class="level ' + (accepted ? 'accepted' : 'rejected') + '">' +
+        (accepted ? 'СИГНАЛ' : 'ОТКАЗ') + '</span><b>' + esc(item.asset) + '</b><span>' + esc(item.timeframe) +
+        '</span><span>' + esc(direction) + '</span><span>' + Number(d.averageSimilarity || 0).toFixed(2) +
+        '% · ' + Number(d.matchCount || 0) + ' совп.</span><span>' + esc(rank) + '</span></div>';
+    }).join('');
+  }
+
+  async function loadRecentDecisions() {
+    const result = await api.getRecentDecisions();
+    if (result && result.ok) { liveDecisions = result.decisions || []; renderLiveDecisions(); }
+  }
+
+  async function scanNow() {
+    $('analysis-monitor-status').textContent = 'Проверяем новые закрытые свечи…';
+    const result = await api.scanNow();
+    if (!result || !result.ok) { $('analysis-monitor-status').textContent = result?.reason || 'Сканирование не выполнено'; return; }
+    $('analysis-monitor-status').textContent = 'Проверка завершена · проанализировано: ' + result.result.scanned +
+      ' · решений: ' + result.result.decisions + ' · подтверждённых сигналов: ' + result.result.signals.length;
+    await loadRecentDecisions();
+  }
 
   async function loadAssets() {
     const select = $('annotation-pair');
@@ -218,6 +288,8 @@
     $('annotation-analysis-result').innerHTML = header + (rows || '<div class="empty">Подходящих примеров не найдено</div>');
   }
 
+  $('analysis-save').addEventListener('click', () => saveAnalysisConfig().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
+  $('analysis-scan-now').addEventListener('click', () => scanNow().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('annotation-load').addEventListener('click', () => loadCandles().catch(e => say(String(e.message || e))));
   $('annotation-refresh-examples').addEventListener('click', refreshExamples);
   $('annotation-save').addEventListener('click', saveExample);
@@ -247,9 +319,12 @@
   document.querySelector('[data-page="annotation"]').addEventListener('click', async () => {
     await loadAssets();
     await refreshExamples();
+    await loadAnalysisConfig();
   });
+  api.onSignalDecision(item => { liveDecisions.unshift(item); liveDecisions = liveDecisions.slice(0,100); renderLiveDecisions(); });
   api.onMarketData(() => {
     if ($('page-annotation').classList.contains('active') && !selectedAsset()) loadAssets();
   });
   loadAssets().catch(() => {});
+  loadRecentDecisions().catch(() => {});
 })();
