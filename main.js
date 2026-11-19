@@ -361,6 +361,7 @@ ipcMain.on('site:market-data', (event, payload) => {
   if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2', 'successcloseOrder', 's_orders/close'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
   try {
     if (payload.eventName === 'successcloseOrder' || payload.eventName === 's_orders/close') {
+      if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo') { log('warn', 'Close event ignored: current account is not verified DEMO', { selectedAccount, accountType: lastBalance && lastBalance.accountType }); return; }
       const closeRows = Array.isArray(payload.payload) ? payload.payload : [payload.payload];
       const balanceRow = closeRows.find(row => row && Number.isFinite(Number(row.balance)) && Number(row.balance) >= 0);
       if (balanceRow) { lastBalance = { accountType: lastBalance && lastBalance.accountType || String(selectedAccount).toLowerCase(), balance: Number(balanceRow.balance), currency: lastBalance && lastBalance.currency || '', ts: Date.now() }; publishStatus(); }
