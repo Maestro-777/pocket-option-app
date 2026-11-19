@@ -46,7 +46,7 @@ class SignalScheduler{
   this.scanning=true;
   try{
    const config=normalizeSchedulerConfig(this.getConfig());if(!config.enabled)return{scanned:0,signals:[],disabled:true};
-   const now=Date.now(),assets=this.marketData.listAssets({otcOnly:true}),exampleCache=new Map(),candidates=[],decisions=[];let scanned=0;
+   const now=Date.now(),assets=this.marketData.listAssets({otcOnly:true}),exampleCache=new Map(),candidates=[],decisions=[],journalEvents=[];let scanned=0;
    for(const assetInfo of assets){
     const asset=assetInfo.symbol;
     for(const timeframe of config.timeframes){
@@ -63,7 +63,7 @@ class SignalScheduler{
       const signalId=asset+'|'+timeframe+'|'+barEndAt;
       const decision={accepted:false,reason:'insufficient_market_data',timeframe,direction:null,matchCount:0,upVotes:0,downVotes:0,averageSimilarity:0,matches:[],settingsSnapshot:{...config.matcher},entryAt:barEndAt,analyzedAt:new Date().toISOString()};
       const record={signalId,asset,timeframe,barEndAt,decision};decisions.push(record);
-      if(this.journal){const snapshot={...config.matcher,asset,timeframe,barEndAt,lookback:config.lookback,maxOpenTrades:config.maxOpenTrades,analysisTimeframes:config.timeframes.slice(),algorithmVersion:1};try{await this.journal.append('DECISION',record,snapshot);}catch(error){this.onError(error);}}
+      if(this.journal){const snapshot={...config.matcher,asset,timeframe,barEndAt,lookback:config.lookback,maxOpenTrades:config.maxOpenTrades,analysisTimeframes:config.timeframes.slice(),algorithmVersion:1};journalEvents.push({type:'DECISION',payload:record,settingsSnapshot:snapshot});}
       continue;
      }
      let examples=exampleCache.get(timeframe);
@@ -75,10 +75,11 @@ class SignalScheduler{
      if(decision.accepted)candidates.push(record);
      if(this.journal){
       const snapshot={...decision.settingsSnapshot,asset,timeframe,barEndAt,lookback:config.lookback,maxOpenTrades:config.maxOpenTrades,analysisTimeframes:config.timeframes.slice(),algorithmVersion:1};
-      try{await this.journal.append('DECISION',{signalId,asset,timeframe,barEndAt,decision},snapshot);}catch(error){this.onError(error);}
+      journalEvents.push({type:'DECISION',payload:{signalId,asset,timeframe,barEndAt,decision},settingsSnapshot:snapshot});
      }
     }
    }
+   if(this.journal&&journalEvents.length){try{if(typeof this.journal.appendMany==='function')await this.journal.appendMany(journalEvents);else for(const item of journalEvents)await this.journal.append(item.type,item.payload,item.settingsSnapshot);}catch(error){this.onError(error);}}
    const ranked=rankCandidates(candidates);
    const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
    const allDecisions=decisions.map(item=>rankedById.get(item.signalId)||{...item,rank:null,withinConfiguredLimit:false});
