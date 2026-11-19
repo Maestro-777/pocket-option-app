@@ -48,7 +48,8 @@
 
 ## 3. SQLite и модели данных
 
-- `core/market-data-store.js`: встроенный `node:sqlite`, schema version 5: таблицы `market_candles`, `asset_catalog`, `manual_examples`, `analysis_decisions`, `trade_results`.
+- `core/market-data-store.js`: встроенный `node:sqlite`, schema version 5: таблицы `market_candles`, `asset_catalog`, `manual_examples`, `analysis_decisions`, `trade_results`. `trade_results` хранит наблюдаемые брокерские закрытия с idempotency key и даёт агрегаты P/L/баланса по измерениям.
+- `normalizeTradeResults` в `core/pocketoption-protocol.js` разбирает `successcloseOrder` и legacy close events; `MarketDataCapture` передаёт их в SQLite через `onTradeResult`. Время/пара/TF/направление/счёт могут быть неизвестны, если брокер не прислал соответствующие поля.
 - Таблицы включают rolling OHLC candles, asset catalog, независимые `manual_examples` и `analysis_decisions`.
 - Ручной пример сохраняет отдельные snapshots до входа и после входа. Ручная разметка не является сделкой и не переписывается алгоритмом.
 - `analysis_decisions` хранит сигнал или отказ, причину, настройки, найденные совпадения, голоса, query candle snapshot и версию алгоритма.
