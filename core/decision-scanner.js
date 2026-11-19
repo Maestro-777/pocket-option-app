@@ -200,7 +200,12 @@ class DecisionScanner {
       selectedTimeframes: this._selectedTimeframes(this.getSettings()),
       rankedSignals: rankSignals([...this._latestSignals.values()].filter(item => {
         const duration = TIMEFRAME_MS[String(item.timeframe || '').toUpperCase()];
-        return duration && Number.isSafeInteger(item.decisionAt) && Date.now() - item.decisionAt < duration;
+        const age = Date.now() - Number(item.decisionAt);
+        return duration && Number.isSafeInteger(item.decisionAt) && age >= 0 && age < duration;
+      })).slice(0, 50).map(item => ({
+        asset: item.asset, timeframe: item.timeframe, direction: item.direction,
+        decisionAt: item.decisionAt, averageSimilarity: item.averageSimilarity,
+        votes: item.votes, historical: item.historical, rank: item.rank, ranking: item.ranking
       })),
       ...this.stats
     };
