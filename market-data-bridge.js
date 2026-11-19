@@ -25,7 +25,7 @@ function publish(name,payload,ws){
     for(const key of ['amount','investment','profit','netProfit','percentProfit','timestamp','time']){const v=num(item[key]);if(v!==undefined)out[key]=v;}
     return out;
    };
-   if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length){const wrapper={deals:clean},balance=num((row&&row.balance)??(row&&row.wallet));if(balance!==undefined&&balance>=0)wrapper.balance=balance;safe.push(wrapper);}}
+   if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length){const wrapper={deals:clean},balance=Number((row&&row.balance)??(row&&row.wallet));if(Number.isFinite(balance)&&balance>=0)wrapper.balance=balance;safe.push(wrapper);}}
    else{const clean=cleanDeal(row);if(clean)safe.push(clean);}
   }else if(name.startsWith('updateHistory')||name.startsWith('loadHistory')||name==='history/list/v2'){
    const data=Array.isArray(row)?row[0]:row;
