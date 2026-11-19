@@ -228,7 +228,7 @@ function attachMarketDataCapture(win) {
   if (marketDataStore) {
     try {
       const restoredCatalog = assetCatalog.restore(marketDataStore.listCatalog({ otcOnly: true }));
-      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(300));
+      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(1000));
       persistedCatalogRevision = assetCatalog.revision;
       log('info', 'Исторические рыночные данные восстановлены', { restoredCatalog, ...restored });
     } catch (error) {
@@ -278,7 +278,7 @@ function persistMarketDataSafely() {
     }
     const now = Date.now();
     if (now - marketLastPruneAt >= 60_000) {
-      marketDataStore.pruneCandles(300);
+      marketDataStore.pruneCandles(1000);
       marketLastPruneAt = now;
     }
     if (marketPersistenceError) {
@@ -522,7 +522,7 @@ ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => 
   const symbol = String(asset || '').trim().toUpperCase();
   if (!symbol.endsWith('_OTC')) throw new TypeError('Разметка разрешена только для OTC-активов');
   return marketDataStore.getCandles(symbol, timeframe, {
-    limit: Math.min(300, Math.max(1, Number(options?.limit) || 300)),
+    limit: Math.min(1000, Math.max(1, Number(options?.limit) || 1000)),
     fromAt: options?.fromAt, toAt: options?.toAt
   });
 });
@@ -768,7 +768,7 @@ else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
   try {
     marketDataStore = new MarketDataStore(path.join(userRoot(), 'market-data.sqlite'));
-    marketDataStore.pruneCandles(300);
+    marketDataStore.pruneCandles(1000);
     marketLastPruneAt = Date.now();
     log('info', 'SQLite хранилище рыночных данных открыто', marketDataStore.getStats());
   } catch (error) {
