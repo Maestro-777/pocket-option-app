@@ -95,6 +95,7 @@
       <div class="panel-card annotation-analysis">
         <div class="panel-head"><div><h3>Поиск похожих ситуаций</h3><p>Сравнение выполняется только внутри выбранного таймфрейма и по общей базе пар</p></div></div>
         <div class="annotation-toolbar">
+          <label>Свечей в паттерне<input id="matcher-pattern-length" type="number" min="2" max="500" value="30"></label>
           <label>Top-N<input id="matcher-topk" type="number" min="1" max="100" value="10"></label>
           <label>Порог сходства, %<input id="matcher-threshold" type="number" min="0" max="100" value="80"></label>
           <label>Минимум примеров<input id="matcher-min-examples" type="number" min="1" max="100" value="3"></label>
