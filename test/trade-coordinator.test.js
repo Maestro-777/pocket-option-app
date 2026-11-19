@@ -39,6 +39,15 @@ test('blocks previously seen and repeated signals in the same batch', () => {
   assert.deepEqual(result.rejected.map(item => item.reason), ['duplicate_signal', 'duplicate_signal']);
 });
 
+test('blocks opposite directions for the same candle from creating a second entry', () => {
+  const up = signal('EURUSD_OTC', 'UP', 90);
+  const down = signal('EURUSD_OTC', 'DOWN', 95, { UP: 2, DOWN: 6 });
+  const result = planTradeIntents([up, down], { tradingEnabled: true, maxOpenTrades: 5 });
+  assert.equal(result.selected.length, 1);
+  assert.equal(result.selected[0].direction, 'UP');
+  assert.equal(result.rejected[0].reason, 'duplicate_signal');
+});
+
 test('rejects malformed signal keys and non-signal decisions', () => {
   assert.throws(() => signalKey({ asset: 'EURUSD', timeframe: 'M4', direction: 'UP' }), /валидную OTC/);
   const result = planTradeIntents([{ status: 'NO_SIGNAL', direction: null }], { tradingEnabled: true });
