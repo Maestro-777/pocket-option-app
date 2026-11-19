@@ -82,7 +82,7 @@ class SignalScheduler{
    if(this.journal&&journalEvents.length){try{if(typeof this.journal.appendMany==='function')await this.journal.appendMany(journalEvents);else for(const item of journalEvents)await this.journal.append(item.type,item.payload,item.settingsSnapshot);}catch(error){this.onError(error);}}
    const ranked=rankCandidates(candidates);
    const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
-   const allDecisions=decisions.map(item=>rankedById.get(item.signalId)||{...item,rank:null,withinConfiguredLimit:false});
+   const allDecisions=decisions.map(item=>{const rankedItem=rankedById.get(item.signalId);return rankedItem?{...rankedItem,withinConfiguredLimit:selected.includes(item.signalId)}:{...item,rank:null,withinConfiguredLimit:false};});
    const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),allDecisions,topCandidateSignalIds:selected,at:new Date().toISOString()};
    this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};this.recentDecisions=allDecisions.concat(this.recentDecisions).slice(0,200);
    for(const item of allDecisions){try{this.onDecision(item);}catch(error){this.onError(error);}}
