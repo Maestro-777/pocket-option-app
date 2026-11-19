@@ -25,8 +25,8 @@ function makeCandles(asset, scale = 1, startAt = 5000, count = 30) {
 
 function example(id, direction, outcome = 'UNKNOWN', overrides = {}) {
   return {
-    id, asset: 'GBPUSD_OTC', timeframe: TIMEFRAME, entryAt: 155000,
-    direction, outcome, expirySeconds: 15,
+    id, asset: 'GBPUSD_OTC', timeframe: TIMEFRAME, entryAt: 155000, segmentEnd: 155000,
+    direction, outcome, expirySeconds: 1,
     inputCandles: makeCandles('GBPUSD_OTC', 1.7, 5000),
     ...overrides
   };
@@ -71,6 +71,18 @@ test('only same-timeframe, earlier examples can vote; future examples are exclud
   assert.equal(result.skippedExamples, 2);
 });
 
+test('does not use a sample before its expiry and labelled segment have completed', () => {
+  const immature = example('immature', 'UP', 'WIN', { expirySeconds: 60, segmentEnd: 180000 });
+  const result = analyzeSimilarity({
+    timeframe: TIMEFRAME, entryAt: 200000,
+    candles: makeCandles('EURUSD_OTC', 1, 5000),
+    examples: [immature],
+    options: { topK: 1, minExamples: 1, minDirectionVotes: 1, minSimilarity: 0 }
+  });
+  assert.equal(result.matches.length, 0);
+  assert.equal(result.skippedExamples, 1);
+});
+
 test('returns no signal when directional votes are split', () => {
   const result = analyzeSimilarity({
     timeframe: TIMEFRAME, entryAt: 160000,
@@ -102,7 +114,7 @@ test('refuses unfinished or future candles in the live query', () => {
 test('walk-forward evaluation uses only strictly earlier examples and reports coverage', () => {
   const examples = Array.from({ length: 8 }, (_, i) => ({
     ...example('wf-' + i, 'UP', i === 7 ? 'LOSS' : 'WIN'),
-    entryAt: 155000 + i * 5000
+    entryAt: 155000 + i * 120000
   }));
   const report = evaluateWalkForward(examples, { topK: 10, minExamples: 3, minDirectionVotes: 6, lookback: 30, minSimilarity: 80 });
   assert.equal(report.evaluated, 8);
