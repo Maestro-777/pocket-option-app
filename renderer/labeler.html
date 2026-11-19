@@ -56,6 +56,21 @@
     </section>
     <section class="analysis-panel">
       <div class="panel-title"><div><p class="eyebrow">PATTERN MATCHING</p><h2>Поиск похожих ситуаций</h2></div></div>
+      <div class="analysis-timeframes">
+        <span class="analysis-timeframes-title">Таймфреймы фонового анализа</span>
+        <div class="analysis-timeframes-grid">
+          <label><input class="analysis-timeframe" type="checkbox" value="S5" checked> S5</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="S10" checked> S10</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="S15" checked> S15</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="S30" checked> S30</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M1" checked> M1</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M2" checked> M2</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M3" checked> M3</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M5" checked> M5</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M10" checked> M10</label>
+          <label><input class="analysis-timeframe" type="checkbox" value="M15" checked> M15</label>
+        </div>
+      </div>
       <div class="analysis-options">
         <label>Лучших сравнений<input id="analysis-topk" type="number" min="1" max="100" value="10"></label>
         <label>Порог сходства, %<input id="analysis-threshold" type="number" min="0" max="100" step="1" value="80"></label>
