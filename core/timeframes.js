@@ -49,7 +49,7 @@ function aggregateTicksToCandles(ticks, timeframe, options = {}) {
     const tick = normalizeTick(raw, index);
     if (!tick) return;
     const startAt = Math.floor(tick.ts / duration) * duration;
-    const key = tick.asset + '|' + startAt;
+    const key = JSON.stringify([tick.asset, startAt]);
     let bucket = buckets.get(key);
     if (!bucket) {
       bucket = { asset: tick.asset, startAt, endAt: startAt + duration, ticks: [] };
@@ -64,14 +64,16 @@ function aggregateTicksToCandles(ticks, timeframe, options = {}) {
     if (!complete && !includeIncomplete) continue;
     bucket.ticks.sort((a, b) => a.ts - b.ts || a.index - b.index);
     const prices = bucket.ticks.map(tick => tick.price);
+    let high = -Infinity, low = Infinity;
+    for (const price of prices) { if (price > high) high = price; if (price < low) low = price; }
     candles.push({
       asset: bucket.asset,
       timeframe: String(timeframe).toUpperCase(),
       startAt: bucket.startAt,
       endAt: bucket.endAt,
       open: prices[0],
-      high: Math.max(...prices),
-      low: Math.min(...prices),
+      high,
+      low,
       close: prices[prices.length - 1],
       tickCount: prices.length,
       complete
