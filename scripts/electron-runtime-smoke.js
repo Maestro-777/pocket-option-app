@@ -2,20 +2,16 @@
 
 const path = require('node:path');
 const { app, BrowserWindow, ipcMain } = require('electron');
+const { MarketDataStore } = require('../core/market-data-store');
 
 app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
-  let database, window;
+  let window;
   try {
-    const { DatabaseSync } = require('node:sqlite');
-    database = new DatabaseSync(':memory:');
-    database.exec('CREATE TABLE smoke_test (value INTEGER NOT NULL) STRICT');
-    database.prepare('INSERT INTO smoke_test(value) VALUES (?)').run(42);
-    const row = database.prepare('SELECT value FROM smoke_test').get();
-    if (row?.value !== 42) throw new Error('SQLite round-trip returned an unexpected value');
-    database.close();
-    database = null;
+    const store = new MarketDataStore(':memory:');
+    if (!store.integrityCheck() || store.getStats().schemaVersion !== 2) throw new Error('SQLite schema v2 did not initialize correctly');
+    store.close();
 
     ipcMain.handle('app:market:assets', () => []);
     ipcMain.handle('app:manual-examples:list', () => []);
@@ -38,7 +34,6 @@ app.whenReady().then(async () => {
     console.log('Electron SQLite and manual labeling renderer smoke tests passed');
     app.exit(0);
   } catch (error) {
-    try { database?.close(); } catch (_) {}
     try { if (window && !window.isDestroyed()) window.destroy(); } catch (_) {}
     console.error('Electron runtime smoke test failed:', error);
     app.exit(1);
