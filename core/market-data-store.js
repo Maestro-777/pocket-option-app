@@ -55,7 +55,7 @@ class MarketDataStore {
     let version = Number(this.db.prepare('PRAGMA user_version').get().user_version);
     if (version > SCHEMA_VERSION) throw new Error('База создана более новой версией приложения');
     if (version === 0) {
-      this.db.exec(\`
+      this.db.exec(`
         BEGIN IMMEDIATE;
         CREATE TABLE market_candles (
           asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64),
@@ -82,11 +82,11 @@ class MarketDataStore {
         ) STRICT, WITHOUT ROWID;
         PRAGMA user_version = 1;
         COMMIT;
-      \`);
+      `);
       version = 1;
     }
     if (version < 2) {
-      this.db.exec(\`
+      this.db.exec(`
         BEGIN IMMEDIATE;
         CREATE TABLE manual_examples (
           id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
@@ -110,7 +110,7 @@ class MarketDataStore {
         CREATE INDEX idx_manual_examples_created ON manual_examples(created_at);
         PRAGMA user_version = 2;
         COMMIT;
-      \`);
+      `);
     }
   }
 
@@ -124,13 +124,13 @@ class MarketDataStore {
         close=excluded.close, tick_count=excluded.tick_count, updated_at=excluded.updated_at
       WHERE excluded.updated_at >= market_candles.updated_at
     `);
-    this._insertManualExample = this.db.prepare(\`
+    this._insertManualExample = this.db.prepare(`
       INSERT INTO manual_examples (id,asset,timeframe,segment_start,segment_end,entry_at,direction,expiry_seconds,entry_price,expiry_price,outcome,input_candles_json,post_candles_json,notes,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    \`);
-    this._updateManualExample = this.db.prepare(\`
+    `);
+    this._updateManualExample = this.db.prepare(`
       UPDATE manual_examples SET asset=?,timeframe=?,segment_start=?,segment_end=?,entry_at=?,direction=?,expiry_seconds=?,entry_price=?,expiry_price=?,outcome=?,input_candles_json=?,post_candles_json=?,notes=?,updated_at=? WHERE id=?
-    \`);
+    `);
     this._upsertAsset = this.db.prepare(`
       INSERT INTO asset_catalog (asset,raw_symbol,label,is_otc,updated_at) VALUES (?,?,?,?,?)
       ON CONFLICT(asset) DO UPDATE SET raw_symbol=excluded.raw_symbol, label=excluded.label,
@@ -324,11 +324,11 @@ class MarketDataStore {
     const timeframe = options.timeframe == null ? null : String(options.timeframe).trim().toUpperCase();
     if (asset && !asset.endsWith('_OTC')) throw new TypeError('Фильтр допускает только OTC-активы');
     if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
-    const rows = this.db.prepare(\`
+    const rows = this.db.prepare(`
       SELECT * FROM manual_examples
       WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
       ORDER BY created_at DESC, id LIMIT ?
-    \`).all(asset, asset, timeframe, timeframe, limit);
+    `).all(asset, asset, timeframe, timeframe, limit);
     return rows.map(row => this._mapManualExample(row));
   }
 
