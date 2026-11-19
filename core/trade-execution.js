@@ -42,14 +42,15 @@ class TradeExecutionAdapter{
   }
   const tradeId=String(signal.signalId),submittedAt=Date.now();
   if(this.ledger){try{await this.ledger.addPending({tradeId,signalId:tradeId,pair:asset,timeframe:String(signal.timeframe),direction:signal.decision.direction,amount,expirySeconds,similarity:Number(signal.decision.averageSimilarity||0),matchCount:Number(signal.decision.matchCount||0),upVotes:Number(signal.decision.upVotes||0),downVotes:Number(signal.decision.downVotes||0),accountMode:'DEMO',submittedAt,status:'PREPARING'});}catch(error){await this.gate.cancelReservation(reservation.reservation.reservationId,'ledger_write_failed');return this._reject(signal,'ledger_write_failed',{message:String(error.message||error)});}}
-  const request={version:1,asset,rawAsset:assetInfo.rawSymbol,direction:signal.decision.direction,amount,expirySeconds,switchTimeoutMs:6000};
-  let result;
+  if(this.gate.getState().paused){if(this.ledger)await this.ledger.markRejected(tradeId,'trading_paused_before_page_command').catch(()=>{});await this.gate.cancelReservation(reservation.reservation.reservationId,'trading_paused_before_page_command');return this._reject(signal,'trading_paused');}
+  const request={version:1,tradeId,asset,rawAsset:assetInfo.rawSymbol,direction:signal.decision.direction,amount,expirySeconds,switchTimeoutMs:6000};
+  let result;this.inFlight={tradeId,win};
   try{
    result=await win.webContents.executeJavaScript('window.__PT_TRADE_COMMAND__('+JSON.stringify(request)+')',true);
   }catch(error){
    await this.gate.cancelReservation(reservation.reservation.reservationId,'page_command_failed');if(this.ledger)await this.ledger.markRejected(tradeId,'page_command_failed').catch(()=>{});
    return this._reject(signal,'page_command_failed',{message:String(error&&error.message||error)});
-  }
+  }finally{this.inFlight=null;}
   if(!result||result.ok!==true||result.submitted!==true){
    await this.gate.cancelReservation(reservation.reservation.reservationId,result&&result.reason||'page_rejected');if(this.ledger)await this.ledger.markRejected(tradeId,result&&result.reason||'page_rejected').catch(()=>{});
    return this._reject(signal,result&&result.reason||'page_rejected',{pageResult:result||null});
@@ -91,6 +92,7 @@ class TradeExecutionAdapter{
   }
   return results;
  }
+ async cancelInFlight(){const current=this.inFlight;if(!current)return false;try{await current.win.webContents.executeJavaScript('window.__PT_CANCEL_TRADE_COMMAND__('+JSON.stringify(current.tradeId)+')',true);return true;}catch(_){return false;}}
  async resolveUnknown(tradeId,action,profitValue){
   const id=String(tradeId),trade=this.submitted.get(id);if(!trade)return{ok:false,reason:'trade_not_found'};
   if(action==='not_opened'){
@@ -110,6 +112,6 @@ class TradeExecutionAdapter{
   return{ok:false,reason:'invalid_resolution_action'};
  }
  restore(records=[]){for(const record of records){if(!record||!['PREPARING','SUBMITTED_UNCONFIRMED','UNKNOWN_AFTER_RESTART'].includes(record.status))continue;this.submitted.set(String(record.tradeId),{...record});}return this.getState();}
- getState(){return{pendingOrSubmitted:this.submitted.size,correlationVerified:this.correlationVerified,trades:Array.from(this.submitted.values()).map(x=>({...x})),ledger:this.ledger?this.ledger.getStatus():null};}
+ getState(){return{pendingOrSubmitted:this.submitted.size,correlationVerified:this.correlationVerified,inFlight:this.inFlight?this.inFlight.tradeId:null,trades:Array.from(this.submitted.values()).map(x=>({...x})),ledger:this.ledger?this.ledger.getStatus():null};}
 }
 module.exports={TradeExecutionAdapter};
