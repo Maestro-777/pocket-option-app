@@ -58,6 +58,17 @@ class DecisionScanner {
     return unique.filter(value => Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, value));
   }
 
+  _analysisOptions(settings) {
+    return validateOptions({
+      topK: settings.similarityTopK ?? settings.topK,
+      minSimilarity: settings.similarityMinSimilarity ?? settings.minSimilarity,
+      minExamples: settings.similarityMinExamples ?? settings.minExamples,
+      minDirectionVotes: settings.similarityMinDirectionVotes ?? settings.minDirectionVotes,
+      lookback: settings.similarityLookback ?? settings.lookback,
+      maxExamples: settings.similarityMaxExamples ?? settings.maxExamples
+    });
+  }
+
   _getExamples(timeframe, maxExamples) {
     const cached = this._examples.get(timeframe);
     if (cached && cached.limit === maxExamples) return cached.items;
@@ -76,7 +87,7 @@ class DecisionScanner {
 
   _scanAsset(asset, settings, timeframes, now) {
     let completed = 0;
-    const config = validateOptions(settings);
+    const config = this._analysisOptions(settings);
     for (const timeframe of timeframes) {
       const candles = this.marketDataHub.getCandles(asset, timeframe, { asOf: now });
       if (!candles.length) continue;
