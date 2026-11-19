@@ -100,6 +100,7 @@ class MarketDataCapture {
       if (!asset) { this.rejectedTicks++; this.rejectedUnknownAssets++; continue; }
       if (asset.ambiguous) { this.rejectedTicks++; this.rejectedAmbiguousAssets++; continue; }
       if (!asset.isOTC || !asset.asset) { this.rejectedTicks++; this.rejectedNonOtcAssets++; continue; }
+      if (asset.source === 'explicit-otc-suffix') this.assetCatalog.rememberExplicitOtc(tick.asset);
       const result = this.marketDataHub.ingest({ ...tick, asset: asset.asset });
       if (result.accepted) {
         this.lastTickAt = tick.ts;
@@ -131,7 +132,7 @@ class MarketDataCapture {
       rejectedUnknownAssets: this.rejectedUnknownAssets,
       rejectedNonOtcAssets: this.rejectedNonOtcAssets,
       rejectedAmbiguousAssets: this.rejectedAmbiguousAssets,
-      catalog: { total: this.assetCatalog.size, otc: this.assetCatalog.listOTC().length, ...this.assetCatalog.stats },
+      catalog: { total: this.assetCatalog.size, otc: this.assetCatalog.listOTC().length, revision: this.assetCatalog.revision, ...this.assetCatalog.stats },
       protocol
     };
   }
