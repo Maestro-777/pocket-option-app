@@ -40,14 +40,17 @@ test('normalizes seconds and milliseconds and rejects malformed frames', () => {
   assert.equal(decoder.stats.malformedFrames, 2);
 });
 
-test('parses object-shaped stream rows only when timestamp is explicit', () => {
+test('uses receive time for object-shaped stream rows without timestamps', () => {
+  const receivedAt = 1700000000123;
   const ticks = normalizeStreamTicks('updateStream', [
     { asset: 'EURUSD_otc', prices: [{ time: 1700000000, price: 1.2 }, { ts: 1700000001, p: 1.3 }] },
     { asset: 'GBPUSD_otc', price: 2 },
     { asset: 'AUDUSD_otc', price: 1, timestamp: 1700000002 }
-  ]);
-  assert.equal(ticks.length, 3);
-  assert.equal(ticks[2].asset, 'AUDUSD_otc');
+  ], receivedAt);
+  assert.equal(ticks.length, 4);
+  assert.equal(ticks[2].asset, 'GBPUSD_otc');
+  assert.equal(ticks[2].ts, receivedAt);
+  assert.equal(ticks[3].asset, 'AUDUSD_otc');
 });
 
 test('uses receive time for documented live tick shapes without timestamps', () => {
