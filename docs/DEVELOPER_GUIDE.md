@@ -56,6 +56,8 @@ Pocket-Option-Background/
 | `renderer/widget.html` | Разметка мини-виджета |
 | `renderer/widget.js` | Отображение статуса и действия мини-виджета |
 | `core/market-data.js` | Нормализация и ограниченное in-memory хранение событий/тиков/OHLC по активам |
+| `core/ipc-validation.js` | Общие валидаторы URL, баланса и market-data IPC batch |
+| `test/ipc-validation.test.js` | Unit-тесты origin и ограничений IPC payload |
 | `core/timeframes.js` | Агрегация таймфреймов и pre-entry выборка |
 | `test/market-data.test.js` | Unit-тесты рыночного адаптера |
 | `modules/manager.js` | Загрузка, health-check и остановка дополнительных модулей |
@@ -143,7 +145,7 @@ Renderer не получает прямой доступ к Node.js. В `preload
 
 ### Проверка сообщений от сайта
 
-В main process события `site:balance`, `site:log` и `site:market-batch` принимаются только если sender совпадает с `siteWindow.webContents`, а URL отправляющего frame принадлежит `pocketoption.com` или его поддомену. Market batch дополнительно ограничен allow-list событий, размером и частотой. Сообщения из MAIN world остаются недоверенными данными и никогда не должны трактоваться как команды.
+В main process события `site:balance`, `site:log` и `site:market-batch` принимаются только если sender совпадает с `siteWindow.webContents`, а URL отправляющего frame принадлежит `pocketoption.com` или его поддомену. Market batch дополнительно ограничен allow-list событий, размером и частотой через core/ipc-validation.js. Баланс проверяется по типу, диапазону, свежести timestamp и частоте. Сообщения из MAIN world остаются недоверенными данными и никогда не должны трактоваться как команды.
 
 Payload баланса дополнительно проверяется: тип счёта должен быть `demo` или `real`, баланс — конечное неотрицательное число, timestamp должен быть свежим и не находиться в будущем; сообщения ограничиваются по частоте. Это не устраняет возможность подделки same-origin скриптом страницы, поскольку текущий баланс передаётся через window.postMessage. Для полной защиты требуется перейти на чтение DOM из isolated preload или принять отдельное архитектурное решение.
 
