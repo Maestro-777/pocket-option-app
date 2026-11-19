@@ -11,8 +11,21 @@
 - [x] Developer Guide и User Guide.
 - [x] pocket-tracker 3.6.0_0/manifest.json и ARCHITECTURE.md.
 
-### Подтверждено
-Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса, модульный менеджер и описанный механизм WebSocket/DOM расширения.
+### Подтверждено чтением и unit-тестами
+- [x] Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса и модульный менеджер.
+- [x] По исходникам 3.6.0 установлено: бинарные Socket.IO payload декодируются как UTF-8 JSON; updateStream/quotes/stream несут тики, в том числе нескольких активов.
+- [x] Локально на Node.js 22.16.0: `node --test` — 32 теста пройдены, 0 ошибок (временная локальная копия исходников).
+- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder, исторического OHLC parser, CDP capture adapter и SQLite MarketDataStore и CRUD ручных примеров.
+- [x] Проверка перезапуска/восстановления SQLite, транзакционного upsert, диапазонных запросов, schema version, dirty revision acknowledgement, backpressure, manual-example snapshots и защита от утечки будущих свечей.
+- [ ] Electron runtime smoke test (`npm run test:electron`) проверяет SQLite round-trip и загрузку окна разметки; ожидает результата Windows CI.
+- [x] OTC-фильтр: проверка явного OTC, normal assets, неизвестных символов и неоднозначных alias.
+- [x] Тесты покрывают таймфреймы, OHLC, поздние тики, ограничение памяти, pre-entry окно, изоляцию сокетов и обработку malformed frames.
+
+### Последняя проверка Windows CI
+- [x] `npm run check` — успешно на Windows runner.
+- [ ] Первый `npm test` запускал 101 тест: 97 прошли, 4 упали из-за отсутствующего экспорта `normalizeTradeResults` из `core/pocketoption-protocol.js`.
+- [x] Причина исправлена: функция добавлена в публичный экспорт модуля.
+- [ ] Повторный Windows CI после исправления — ожидает запуска/результата.
 
 ### Не запускалось или не подтверждено
 - [ ] npm install.
@@ -21,7 +34,9 @@
 - [ ] npm run pack / npm run dist.
 - [ ] запуск на Windows 11 x64.
 - [ ] интеграция с текущим Pocket Option.
-- [ ] end-to-end рыночные данные.
+- [ ] end-to-end рыночные данные на живом Pocket Option.
+- [ ] Проверка CDP capture на Windows Electron 45.3.4.
+- [ ] Проверка SQLite write latency и memory footprint на реальном потоке OTC.
 - [ ] DEMO сделки.
 - [ ] REAL сделки.
 

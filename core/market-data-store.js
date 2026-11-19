@@ -1,0 +1,760 @@
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const { TIMEFRAME_MS } = require('./timeframes');
+
+const SCHEMA_VERSION = 5;
+const VALID_TIMEFRAMES = new Set(Object.keys(TIMEFRAME_MS));
+
+function validateCandle(candle) {
+  if (!candle || typeof candle !== 'object' || Array.isArray(candle)) throw new TypeError('Свеча должна быть объектом');
+  const asset = String(candle.asset || '').trim().toUpperCase();
+  const timeframe = String(candle.timeframe || '').toUpperCase();
+  const startAt = Number(candle.startAt), endAt = Number(candle.endAt);
+  const openAt = Number(candle.openAt ?? startAt), closeAt = Number(candle.closeAt ?? (endAt - 1));
+  const open = Number(candle.open), high = Number(candle.high), low = Number(candle.low), close = Number(candle.close);
+  const tickCount = Number(candle.tickCount);
+  if (!asset || asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset)) throw new TypeError('Некорректный актив свечи');
+  if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм свечи');
+  if (!Number.isSafeInteger(startAt) || startAt <= 0 || !Number.isSafeInteger(endAt) || endAt <= startAt ||
+      startAt % TIMEFRAME_MS[timeframe] !== 0 || endAt !== startAt + TIMEFRAME_MS[timeframe] ||
+      !Number.isSafeInteger(openAt) || !Number.isSafeInteger(closeAt) || openAt < startAt || closeAt < openAt || closeAt >= endAt) {
+    throw new TypeError('Некорректный интервал свечи');
+  }
+  if (![open, high, low, close].every(value => Number.isFinite(value) && value > 0)) throw new TypeError('OHLC должны быть положительными конечными числами');
+  if (high < Math.max(open, low, close) || low > Math.min(open, high, close)) throw new TypeError('Нарушена целостность OHLC');
+  if (!Number.isSafeInteger(tickCount) || tickCount < 1) throw new TypeError('tickCount должен быть положительным целым числом');
+  if (candle.complete !== true) throw new TypeError('В хранилище разрешено записывать только закрытые свечи');
+  return { asset, timeframe, startAt, endAt, openAt, closeAt, open, high, low, close, tickCount };
+}
+
+class MarketDataStore {
+  constructor(databasePath, options = {}) {
+    if (typeof databasePath !== 'string' || !databasePath.trim()) throw new TypeError('databasePath обязателен');
+    if (options == null || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('options должен быть объектом');
+    this.databasePath = databasePath;
+    this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 1000 : Number(options.maxCandlesPerSeries);
+    this._pruneCounters = new Map();
+    if (!Number.isInteger(this.maxCandlesPerSeries) || this.maxCandlesPerSeries < 1 || this.maxCandlesPerSeries > 100_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 100000');
+    let DatabaseSync;
+    try { ({ DatabaseSync } = require('node:sqlite')); }
+    catch (error) { throw new Error('Встроенный SQLite недоступен в Node runtime Electron: ' + String(error?.message || error)); }
+    if (databasePath !== ':memory:') fs.mkdirSync(path.dirname(databasePath), { recursive: true });
+    this.db = new DatabaseSync(databasePath);
+    this.closed = false;
+    try {
+      this.db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+      this._migrate();
+      this._prepareStatements();
+    } catch (error) {
+      try { this.db.close(); } catch (_) {}
+      this.closed = true;
+      throw error;
+    }
+  }
+
+  _migrate() {
+    let version = Number(this.db.prepare('PRAGMA user_version').get().user_version);
+    if (version > SCHEMA_VERSION) throw new Error('База создана более новой версией приложения');
+    if (version === 0) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE market_candles (
+          asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64),
+          timeframe TEXT NOT NULL CHECK(timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          start_at INTEGER NOT NULL CHECK(start_at > 0),
+          end_at INTEGER NOT NULL CHECK(end_at > start_at),
+          open_at INTEGER NOT NULL CHECK(open_at >= start_at AND open_at < end_at),
+          close_at INTEGER NOT NULL CHECK(close_at >= open_at AND close_at < end_at),
+          open REAL NOT NULL CHECK(open > 0),
+          high REAL NOT NULL CHECK(high >= open AND high >= close AND high >= low),
+          low REAL NOT NULL CHECK(low > 0 AND low <= open AND low <= close),
+          close REAL NOT NULL CHECK(close > 0),
+          tick_count INTEGER NOT NULL CHECK(tick_count > 0),
+          updated_at INTEGER NOT NULL CHECK(updated_at > 0),
+          PRIMARY KEY(asset, timeframe, start_at)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX idx_market_candles_time ON market_candles(timeframe, start_at);
+        CREATE INDEX idx_market_candles_asset_time ON market_candles(asset, start_at);
+        CREATE TABLE asset_catalog (
+          asset TEXT PRIMARY KEY CHECK(length(asset) BETWEEN 1 AND 64),
+          raw_symbol TEXT NOT NULL, label TEXT NOT NULL,
+          is_otc INTEGER NOT NULL CHECK(is_otc IN (0,1)),
+          updated_at INTEGER NOT NULL CHECK(updated_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        PRAGMA user_version = 1;
+        COMMIT;
+      `);
+      version = 1;
+    }
+    if (version < 2) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE manual_examples (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64 AND substr(asset,-4) = '_OTC'),
+          timeframe TEXT NOT NULL CHECK(timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          segment_start INTEGER NOT NULL CHECK(segment_start > 0),
+          segment_end INTEGER NOT NULL CHECK(segment_end > segment_start),
+          entry_at INTEGER NOT NULL CHECK(entry_at >= segment_start AND entry_at <= segment_end),
+          direction TEXT NOT NULL CHECK(direction IN ('UP','DOWN')),
+          expiry_seconds INTEGER NOT NULL CHECK(expiry_seconds BETWEEN 1 AND 86400),
+          entry_price REAL NOT NULL CHECK(entry_price > 0),
+          expiry_price REAL CHECK(expiry_price IS NULL OR expiry_price > 0),
+          outcome TEXT NOT NULL CHECK(outcome IN ('WIN','LOSS','DRAW','UNKNOWN')),
+          input_candles_json TEXT NOT NULL CHECK(json_valid(input_candles_json)),
+          post_candles_json TEXT NOT NULL CHECK(json_valid(post_candles_json)),
+          notes TEXT NOT NULL CHECK(length(notes) <= 2000),
+          created_at INTEGER NOT NULL CHECK(created_at > 0),
+          updated_at INTEGER NOT NULL CHECK(updated_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX idx_manual_examples_asset_tf ON manual_examples(asset,timeframe,created_at);
+        CREATE INDEX idx_manual_examples_created ON manual_examples(created_at);
+        PRAGMA user_version = 2;
+        COMMIT;
+      `);
+    }
+    if (version < 3) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE analysis_decisions (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64 AND substr(asset,-4) = '_OTC'),
+          timeframe TEXT NOT NULL CHECK(timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          decision_at INTEGER NOT NULL CHECK(decision_at > 0),
+          status TEXT NOT NULL CHECK(status IN ('SIGNAL','NO_SIGNAL')),
+          direction TEXT CHECK(direction IS NULL OR direction IN ('UP','DOWN')),
+          reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 128),
+          params_json TEXT NOT NULL CHECK(json_valid(params_json)),
+          matches_json TEXT NOT NULL CHECK(json_valid(matches_json)),
+          votes_json TEXT NOT NULL CHECK(json_valid(votes_json)),
+          average_similarity REAL CHECK(average_similarity IS NULL OR (average_similarity >= 0 AND average_similarity <= 100)),
+          query_candles_json TEXT NOT NULL CHECK(json_valid(query_candles_json)),
+          algorithm_version TEXT NOT NULL CHECK(length(algorithm_version) BETWEEN 1 AND 64),
+          created_at INTEGER NOT NULL CHECK(created_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX idx_analysis_decisions_asset_tf_time ON analysis_decisions(asset,timeframe,decision_at DESC);
+        CREATE INDEX idx_analysis_decisions_time ON analysis_decisions(decision_at DESC);
+        CREATE INDEX idx_analysis_decisions_status ON analysis_decisions(status,decision_at DESC);
+        PRAGMA user_version = 3;
+        COMMIT;
+      `);
+    }
+    if (version < 4) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE analysis_decisions ADD COLUMN historical_json TEXT NOT NULL
+          DEFAULT '{"wins":0,"losses":0,"draws":0,"unknown":0,"winRate":null}'
+          CHECK(json_valid(historical_json));
+        PRAGMA user_version = 4;
+        COMMIT;
+      `);
+    }
+    if (version < 5) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE trade_results (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          event_key TEXT NOT NULL UNIQUE CHECK(length(event_key) BETWEEN 1 AND 256),
+          broker_trade_id TEXT,
+          asset TEXT CHECK(asset IS NULL OR length(asset) BETWEEN 1 AND 64),
+          timeframe TEXT CHECK(timeframe IS NULL OR timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          direction TEXT CHECK(direction IS NULL OR direction IN ('UP','DOWN')),
+          account_mode TEXT NOT NULL CHECK(account_mode IN ('DEMO','REAL','UNKNOWN')),
+          amount REAL NOT NULL CHECK(amount > 0),
+          profit REAL NOT NULL,
+          result TEXT NOT NULL CHECK(result IN ('WIN','LOSS','DRAW')),
+          entry_at INTEGER CHECK(entry_at IS NULL OR entry_at > 0),
+          closed_at INTEGER NOT NULL CHECK(closed_at > 0),
+          expiry_seconds INTEGER CHECK(expiry_seconds IS NULL OR expiry_seconds BETWEEN 1 AND 86400),
+          payout_rate REAL CHECK(payout_rate IS NULL OR payout_rate >= 0),
+          balance_after REAL CHECK(balance_after IS NULL OR balance_after >= 0),
+          source_event TEXT NOT NULL CHECK(length(source_event) BETWEEN 1 AND 64),
+          created_at INTEGER NOT NULL CHECK(created_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE UNIQUE INDEX idx_trade_results_broker_id ON trade_results(broker_trade_id) WHERE broker_trade_id IS NOT NULL;
+        CREATE INDEX idx_trade_results_closed_at ON trade_results(closed_at DESC);
+        CREATE INDEX idx_trade_results_asset_time ON trade_results(asset,closed_at DESC);
+        CREATE INDEX idx_trade_results_account_time ON trade_results(account_mode,closed_at DESC);
+        PRAGMA user_version = 5;
+        COMMIT;
+      `);
+      version = 5;
+    }
+  }
+
+  _prepareStatements() {
+    this._upsertCandle = this.db.prepare(`
+      INSERT INTO market_candles (asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(asset,timeframe,start_at) DO UPDATE SET
+        end_at=excluded.end_at, open_at=excluded.open_at, close_at=excluded.close_at,
+        open=excluded.open, high=excluded.high, low=excluded.low,
+        close=excluded.close, tick_count=excluded.tick_count, updated_at=excluded.updated_at
+      WHERE excluded.updated_at >= market_candles.updated_at
+    `);
+    this._insertManualExample = this.db.prepare(`
+      INSERT INTO manual_examples (id,asset,timeframe,segment_start,segment_end,entry_at,direction,expiry_seconds,entry_price,expiry_price,outcome,input_candles_json,post_candles_json,notes,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    this._updateManualExample = this.db.prepare(`
+      UPDATE manual_examples SET asset=?,timeframe=?,segment_start=?,segment_end=?,entry_at=?,direction=?,expiry_seconds=?,entry_price=?,expiry_price=?,outcome=?,input_candles_json=?,post_candles_json=?,notes=?,updated_at=? WHERE id=?
+    `);
+    this._upsertAsset = this.db.prepare(`
+      INSERT INTO asset_catalog (asset,raw_symbol,label,is_otc,updated_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(asset) DO UPDATE SET raw_symbol=excluded.raw_symbol, label=excluded.label,
+        is_otc=excluded.is_otc, updated_at=excluded.updated_at
+      WHERE excluded.updated_at >= asset_catalog.updated_at
+    `);
+    this._pruneCandleSeries = this.db.prepare(`
+      DELETE FROM market_candles
+      WHERE asset=? AND timeframe=? AND start_at NOT IN (
+        SELECT start_at FROM market_candles WHERE asset=? AND timeframe=?
+        ORDER BY start_at DESC LIMIT ?
+      )
+    `);
+    this._insertTradeResult = this.db.prepare(`
+      INSERT OR IGNORE INTO trade_results
+      (id,event_key,broker_trade_id,asset,timeframe,direction,account_mode,amount,profit,result,entry_at,closed_at,expiry_seconds,payout_rate,balance_after,source_event,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+    this._insertAnalysisDecision = this.db.prepare(`
+      INSERT INTO analysis_decisions
+      (id,asset,timeframe,decision_at,status,direction,reason,params_json,matches_json,votes_json,average_similarity,query_candles_json,algorithm_version,created_at,historical_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `);
+  }
+
+  _assertOpen() { if (this.closed) throw new Error('Хранилище уже закрыто'); }
+
+  upsertCandles(candles, updatedAt = Date.now()) {
+    this._assertOpen();
+    if (!Array.isArray(candles)) throw new TypeError('candles должен быть массивом');
+    if (!Number.isSafeInteger(updatedAt) || updatedAt <= 0) throw new TypeError('updatedAt должен быть Unix timestamp в миллисекундах');
+    if (candles.length > 50_000) throw new RangeError('Слишком большой пакет свечей');
+    const validated = candles.map(validateCandle);
+    if (!validated.length) return 0;
+    let changes = 0;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const affectedSeries = new Map();
+      for (const candle of validated) {
+        const result = this._upsertCandle.run(candle.asset, candle.timeframe, candle.startAt, candle.endAt,
+          candle.openAt, candle.closeAt, candle.open, candle.high, candle.low, candle.close, candle.tickCount, updatedAt);
+        changes += Number(result.changes || 0);
+        const key = candle.asset + '|' + candle.timeframe;
+        const entry = affectedSeries.get(key) || { asset: candle.asset, timeframe: candle.timeframe, count: 0 };
+        entry.count++;
+        affectedSeries.set(key, entry);
+      }
+      const pruneThreshold = Math.min(100, this.maxCandlesPerSeries);
+      const nextPruneCounters = new Map();
+      for (const [key, entry] of affectedSeries) {
+        const pending = (this._pruneCounters.get(key) || 0) + entry.count;
+        if (pending >= pruneThreshold) {
+          this._pruneCandleSeries.run(entry.asset, entry.timeframe, entry.asset, entry.timeframe, this.maxCandlesPerSeries);
+          nextPruneCounters.set(key, 0);
+        } else {
+          nextPruneCounters.set(key, pending);
+        }
+      }
+      this.db.exec('COMMIT');
+      for (const [key, value] of nextPruneCounters) this._pruneCounters.set(key, value);
+      return changes;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch (_) {}
+      throw error;
+    }
+  }
+
+  upsertCatalog(entries, updatedAt = Date.now()) {
+    this._assertOpen();
+    if (!Array.isArray(entries)) throw new TypeError('entries должен быть массивом');
+    if (!Number.isSafeInteger(updatedAt) || updatedAt <= 0) throw new TypeError('updatedAt должен быть Unix timestamp в миллисекундах');
+    const rows = entries.map(entry => {
+      if (!entry || typeof entry !== 'object') throw new TypeError('Некорректная запись каталога');
+      const asset = String(entry.asset || '').trim().toUpperCase();
+      const rawSymbol = String(entry.rawSymbol || '').trim();
+      const label = String(entry.label || rawSymbol).trim();
+      if (!asset || asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset) || !rawSymbol || rawSymbol.length > 128 || !label || label.length > 256) throw new TypeError('Некорректные поля записи каталога');
+      if (typeof entry.isOTC !== 'boolean') throw new TypeError('isOTC должен быть boolean');
+      if (entry.isOTC !== asset.endsWith('_OTC')) throw new TypeError('isOTC не соответствует суффиксу актива');
+      return { asset, rawSymbol, label, isOTC: entry.isOTC };
+    });
+    if (!rows.length) return 0;
+    let changes = 0;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const row of rows) {
+        const result = this._upsertAsset.run(row.asset, row.rawSymbol, row.label, row.isOTC ? 1 : 0, updatedAt);
+        changes += Number(result.changes || 0);
+      }
+      this.db.exec('COMMIT');
+      return changes;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch (_) {}
+      throw error;
+    }
+  }
+
+  getCandles(asset, timeframe, options = {}) {
+    this._assertOpen();
+    const symbol = String(asset || '').trim().toUpperCase(), tf = String(timeframe || '').toUpperCase();
+    if (!symbol || symbol.length > 64 || !/^[A-Z0-9._-]+$/.test(symbol)) throw new TypeError('Некорректный актив');
+    if (!VALID_TIMEFRAMES.has(tf)) throw new TypeError('Неподдерживаемый таймфрейм');
+    const limit = options.limit == null ? 1000 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new RangeError('limit должен быть от 1 до 100000');
+    const fromAt = options.fromAt == null ? null : Number(options.fromAt), toAt = options.toAt == null ? null : Number(options.toAt);
+    if (fromAt != null && (!Number.isSafeInteger(fromAt) || fromAt <= 0)) throw new TypeError('Некорректный fromAt');
+    if (toAt != null && (!Number.isSafeInteger(toAt) || toAt <= 0)) throw new TypeError('Некорректный toAt');
+    if (fromAt != null && toAt != null && fromAt > toAt) throw new RangeError('fromAt не может быть больше toAt');
+    const rows = this.db.prepare(`
+      SELECT asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count
+      FROM market_candles WHERE asset=? AND timeframe=?
+        AND (? IS NULL OR start_at >= ?) AND (? IS NULL OR end_at <= ?)
+      ORDER BY start_at DESC LIMIT ?
+    `).all(symbol, tf, fromAt, fromAt, toAt, toAt, limit);
+    return rows.reverse().map(row => ({
+      asset: row.asset, timeframe: row.timeframe, startAt: row.start_at, endAt: row.end_at,
+      openAt: row.open_at, closeAt: row.close_at, open: row.open, high: row.high, low: row.low,
+      close: row.close, tickCount: row.tick_count, complete: true
+    }));
+  }
+
+  getRecentCandles(limitPerSeries = this.maxCandlesPerSeries) {
+    this._assertOpen();
+    const limit = Number(limitPerSeries);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new RangeError('limitPerSeries должен быть от 1 до 100000');
+    const rows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT c.asset,c.timeframe,c.start_at,c.end_at,c.open_at,c.close_at,c.open,c.high,c.low,c.close,c.tick_count,
+          ROW_NUMBER() OVER(PARTITION BY c.asset,c.timeframe ORDER BY c.start_at DESC) AS rn
+        FROM market_candles c LEFT JOIN asset_catalog a ON a.asset=c.asset
+        WHERE a.is_otc=1 OR substr(c.asset, -4) = '_OTC'
+      )
+      SELECT asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count
+      FROM ranked WHERE rn <= ? ORDER BY asset,timeframe,start_at
+    `).all(limit);
+    return rows.map(row => ({
+      asset: row.asset, timeframe: row.timeframe, startAt: row.start_at, endAt: row.end_at,
+      openAt: row.open_at, closeAt: row.close_at, open: row.open, high: row.high, low: row.low,
+      close: row.close, tickCount: row.tick_count, complete: true
+    }));
+  }
+
+  _normalizeManualExample(example, options = {}) {
+    if (!example || typeof example !== 'object' || Array.isArray(example)) throw new TypeError('Пример должен быть объектом');
+    const id = String(example.id || crypto.randomUUID());
+    const asset = String(example.asset || '').trim().toUpperCase();
+    const timeframe = String(example.timeframe || '').trim().toUpperCase();
+    const segmentStart = Number(example.segmentStart), segmentEnd = Number(example.segmentEnd), entryAt = Number(example.entryAt);
+    const expirySeconds = Number(example.expirySeconds);
+    const entryPrice = Number(example.entryPrice);
+    const expiryPrice = example.expiryPrice == null ? null : Number(example.expiryPrice);
+    const direction = String(example.direction || '').toUpperCase();
+    let outcome = String(example.outcome || 'UNKNOWN').toUpperCase();
+    const notes = String(example.notes || '');
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new TypeError('Некорректный идентификатор примера');
+    if (!asset.endsWith('_OTC') || !/^[A-Z0-9._-]{1,64}$/.test(asset)) throw new TypeError('Пример должен относиться к OTC-активу');
+    if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (![segmentStart, segmentEnd, entryAt].every(Number.isSafeInteger) || segmentStart <= 0 || segmentEnd <= segmentStart || entryAt < segmentStart || entryAt >= segmentEnd || segmentStart % TIMEFRAME_MS[timeframe] !== 0 || segmentEnd % TIMEFRAME_MS[timeframe] !== 0) throw new TypeError('Некорректные границы участка или точка входа');
+    if (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400) throw new TypeError('Экспирация должна быть от 1 до 86400 секунд');
+    if (!['UP','DOWN'].includes(direction)) throw new TypeError('Направление должно быть UP или DOWN');
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0 || (expiryPrice != null && (!Number.isFinite(expiryPrice) || expiryPrice <= 0))) throw new TypeError('Некорректная цена входа или экспирации');
+    if (!['WIN','LOSS','DRAW','UNKNOWN'].includes(outcome)) throw new TypeError('Некорректный результат примера');
+    if (notes.length > 2000) throw new RangeError('Примечание не должно превышать 2000 символов');
+    if (!Array.isArray(example.inputCandles) || !example.inputCandles.length || example.inputCandles.length > 300) throw new TypeError('Нужны от 1 до 300 предвходящих свечей');
+    if (!Array.isArray(example.postCandles) || !example.postCandles.length || example.postCandles.length > 300) throw new TypeError('Нужны от 1 до 300 поствходящих свечей');
+    const validateSnapshot = (candles, kind) => {
+      const normalized = candles.map(candle => validateCandle({ ...candle, complete: true }));
+      for (let i = 0; i < normalized.length; i++) {
+        const candle = normalized[i];
+        if (candle.asset !== asset || candle.timeframe !== timeframe) throw new TypeError('Свечи примера должны совпадать по активу и таймфрейму');
+        if (i && candle.startAt <= normalized[i - 1].startAt) throw new TypeError('Свечи примера должны быть строго упорядочены');
+        if (kind === 'input' && (candle.startAt < segmentStart || candle.endAt > entryAt)) throw new TypeError('Предвходящие признаки не могут содержать свечи после точки входа');
+        if (kind === 'post' && (candle.endAt <= entryAt || candle.startAt > segmentEnd || candle.endAt > segmentEnd)) throw new TypeError('Поствходящие свечи должны располагаться после входа внутри участка');
+      }
+      return normalized;
+    };
+    const input = validateSnapshot(example.inputCandles, 'input');
+    const post = validateSnapshot(example.postCandles, 'post');
+    if (expiryPrice != null && outcome === 'UNKNOWN') {
+      outcome = expiryPrice === entryPrice ? 'DRAW'
+        : ((direction === 'UP' && expiryPrice > entryPrice) || (direction === 'DOWN' && expiryPrice < entryPrice)) ? 'WIN' : 'LOSS';
+    }
+    const createdAt = Number(options.createdAt ?? options.now ?? Date.now());
+    const updatedAt = Number(options.now ?? Date.now());
+    if (!Number.isSafeInteger(createdAt) || createdAt <= 0 || !Number.isSafeInteger(updatedAt) || updatedAt <= 0) throw new TypeError('Некорректные временные метки примера');
+    return { id, asset, timeframe, segmentStart, segmentEnd, entryAt, direction, expirySeconds,
+      entryPrice, expiryPrice, outcome, inputCandles: input, postCandles: post, notes, createdAt, updatedAt };
+  }
+
+  _mapManualExample(row) {
+    return {
+      id: row.id, asset: row.asset, timeframe: row.timeframe,
+      segmentStart: row.segment_start, segmentEnd: row.segment_end, entryAt: row.entry_at,
+      direction: row.direction, expirySeconds: row.expiry_seconds,
+      entryPrice: row.entry_price, expiryPrice: row.expiry_price, outcome: row.outcome,
+      inputCandles: JSON.parse(row.input_candles_json), postCandles: JSON.parse(row.post_candles_json),
+      notes: row.notes, createdAt: row.created_at, updatedAt: row.updated_at
+    };
+  }
+
+  createManualExample(example, now = Date.now()) {
+    this._assertOpen();
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время создания');
+    const normalized = this._normalizeManualExample(example, { now });
+    this._insertManualExample.run(
+      normalized.id, normalized.asset, normalized.timeframe, normalized.segmentStart, normalized.segmentEnd,
+      normalized.entryAt, normalized.direction, normalized.expirySeconds, normalized.entryPrice,
+      normalized.expiryPrice, normalized.outcome, JSON.stringify(normalized.inputCandles),
+      JSON.stringify(normalized.postCandles), normalized.notes, normalized.createdAt, normalized.updatedAt
+    );
+    return this.getManualExample(normalized.id);
+  }
+
+  getManualExample(id) {
+    this._assertOpen();
+    const row = this.db.prepare('SELECT * FROM manual_examples WHERE id=?').get(String(id));
+    return row ? this._mapManualExample(row) : null;
+  }
+
+  listManualExamples(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 500 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10000) throw new RangeError('limit должен быть от 1 до 10000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).trim().toUpperCase();
+    if (asset && !asset.endsWith('_OTC')) throw new TypeError('Фильтр допускает только OTC-активы');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    const rows = this.db.prepare(`
+      SELECT * FROM manual_examples
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+      ORDER BY created_at DESC, id LIMIT ?
+    `).all(asset, asset, timeframe, timeframe, limit);
+    return rows.map(row => this._mapManualExample(row));
+  }
+
+  updateManualExample(id, changes, now = Date.now()) {
+    this._assertOpen();
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время обновления');
+    const existing = this.getManualExample(id);
+    if (!existing) return null;
+    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new TypeError('Изменения примера должны быть объектом');
+    const merged = { ...existing, ...changes, id: existing.id, createdAt: existing.createdAt };
+    const normalized = this._normalizeManualExample(merged, { now, createdAt: existing.createdAt });
+    this._updateManualExample.run(
+      normalized.asset, normalized.timeframe, normalized.segmentStart, normalized.segmentEnd,
+      normalized.entryAt, normalized.direction, normalized.expirySeconds, normalized.entryPrice,
+      normalized.expiryPrice, normalized.outcome, JSON.stringify(normalized.inputCandles),
+      JSON.stringify(normalized.postCandles), normalized.notes, normalized.updatedAt, normalized.id
+    );
+    return this.getManualExample(normalized.id);
+  }
+
+  deleteManualExample(id) {
+    this._assertOpen();
+    const result = this.db.prepare('DELETE FROM manual_examples WHERE id=?').run(String(id));
+    return Number(result.changes || 0) > 0;
+  }
+
+  pruneCandles(maxCandlesPerSeries = this.maxCandlesPerSeries) {
+    this._assertOpen();
+    const limit = Number(maxCandlesPerSeries);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 1000000');
+    const result = this.db.prepare(`
+      DELETE FROM market_candles
+      WHERE (asset,timeframe,start_at) IN (
+        SELECT asset,timeframe,start_at FROM (
+          SELECT asset,timeframe,start_at,
+            ROW_NUMBER() OVER(PARTITION BY asset,timeframe ORDER BY start_at DESC) AS rn
+          FROM market_candles
+        ) WHERE rn > ?
+      )
+    `).run(limit);
+    return Number(result.changes || 0);
+  }
+
+  listCatalog(options = {}) {
+    this._assertOpen();
+    const rows = options.otcOnly === true
+      ? this.db.prepare('SELECT asset,raw_symbol,label,is_otc,updated_at FROM asset_catalog WHERE is_otc=1 ORDER BY asset').all()
+      : this.db.prepare('SELECT asset,raw_symbol,label,is_otc,updated_at FROM asset_catalog ORDER BY asset').all();
+    return rows.map(row => ({ asset: row.asset, rawSymbol: row.raw_symbol, label: row.label, isOTC: row.is_otc === 1, updatedAt: row.updated_at }));
+  }
+
+  _mapAnalysisDecision(row) {
+    return {
+      id: row.id, asset: row.asset, timeframe: row.timeframe, decisionAt: row.decision_at,
+      status: row.status, direction: row.direction, reason: row.reason,
+      paramsSnapshot: JSON.parse(row.params_json), matches: JSON.parse(row.matches_json),
+      votes: JSON.parse(row.votes_json), averageSimilarity: row.average_similarity,
+      historical: JSON.parse(row.historical_json),
+      queryCandles: JSON.parse(row.query_candles_json), algorithmVersion: row.algorithm_version,
+      createdAt: row.created_at
+    };
+  }
+
+  createAnalysisDecision(decision, now = Date.now()) {
+    this._assertOpen();
+    if (!decision || typeof decision !== 'object' || Array.isArray(decision)) throw new TypeError('Решение должно быть объектом');
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время создания решения');
+    const id = String(decision.id || crypto.randomUUID());
+    const asset = String(decision.asset || '').trim().toUpperCase();
+    const timeframe = String(decision.timeframe || '').trim().toUpperCase();
+    const decisionAt = Number(decision.decisionAt);
+    const status = String(decision.status || '').toUpperCase();
+    const direction = decision.direction == null || decision.direction === 'NONE' ? null : String(decision.direction).toUpperCase();
+    const reason = String(decision.reason || '');
+    const algorithmVersion = String(decision.algorithmVersion || 'shape-v1');
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new TypeError('Некорректный идентификатор решения');
+    if (!asset.endsWith('_OTC') || !/^[A-Z0-9._-]{1,64}$/.test(asset)) throw new TypeError('Решение должно относиться к OTC-активу');
+    if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм решения');
+    if (!Number.isSafeInteger(decisionAt) || decisionAt <= 0 || decisionAt > now) throw new TypeError('Некорректное время решения');
+    if (!['SIGNAL', 'NO_SIGNAL'].includes(status)) throw new TypeError('Некорректный статус решения');
+    if ((status === 'SIGNAL' && !['UP', 'DOWN'].includes(direction)) || (status === 'NO_SIGNAL' && direction !== null)) {
+      throw new TypeError('Направление не соответствует статусу решения');
+    }
+    if (!/^[a-z0-9_:-]{1,128}$/i.test(reason)) throw new TypeError('Некорректная причина решения');
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(algorithmVersion)) throw new TypeError('Некорректная версия алгоритма');
+    if (!decision.paramsSnapshot || typeof decision.paramsSnapshot !== 'object' || Array.isArray(decision.paramsSnapshot)) throw new TypeError('Нужен snapshot параметров решения');
+    if (!Array.isArray(decision.matches) || decision.matches.length > 100) throw new TypeError('matches должен быть массивом до 100 записей');
+    if (!decision.votes || typeof decision.votes !== 'object' || Array.isArray(decision.votes)) throw new TypeError('votes должен быть объектом');
+    const votes = { UP: Number(decision.votes.UP), DOWN: Number(decision.votes.DOWN) };
+    if (!Object.values(votes).every(value => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Некорректные голоса направления');
+    const averageSimilarity = decision.averageSimilarity == null ? null : Number(decision.averageSimilarity);
+    if (averageSimilarity != null && (!Number.isFinite(averageSimilarity) || averageSimilarity < 0 || averageSimilarity > 100)) throw new TypeError('Некорректное среднее сходство');
+    const sourceHistorical = decision.historical && typeof decision.historical === 'object' && !Array.isArray(decision.historical)
+      ? decision.historical : {};
+    const historical = {
+      wins: Number(sourceHistorical.wins || 0), losses: Number(sourceHistorical.losses || 0),
+      draws: Number(sourceHistorical.draws || 0), unknown: Number(sourceHistorical.unknown || 0),
+      winRate: sourceHistorical.winRate == null ? null : Number(sourceHistorical.winRate)
+    };
+    if (![historical.wins, historical.losses, historical.draws, historical.unknown].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        (historical.winRate != null && (!Number.isFinite(historical.winRate) || historical.winRate < 0 || historical.winRate > 100))) {
+      throw new TypeError('Некорректная историческая результативность');
+    }
+    if (!Array.isArray(decision.queryCandles) || decision.queryCandles.length > 300) throw new TypeError('queryCandles должен быть массивом до 300 свечей');
+    const paramsJson = JSON.stringify(decision.paramsSnapshot);
+    const matchesJson = JSON.stringify(decision.matches);
+    const votesJson = JSON.stringify(votes);
+    const historicalJson = JSON.stringify(historical);
+    const queryJson = JSON.stringify(decision.queryCandles);
+    if ([paramsJson, matchesJson, votesJson, historicalJson, queryJson].some(value => typeof value !== 'string') ||
+        paramsJson.length > 64_000 || matchesJson.length > 1_000_000 || queryJson.length > 2_000_000) {
+      throw new RangeError('Снимок решения превышает допустимый размер');
+    }
+    this._insertAnalysisDecision.run(
+      id, asset, timeframe, decisionAt, status, direction, reason, paramsJson, matchesJson,
+      votesJson, averageSimilarity, queryJson, algorithmVersion, now, historicalJson
+    );
+    return this.getAnalysisDecision(id);
+  }
+
+  getAnalysisDecision(id) {
+    this._assertOpen();
+    const row = this.db.prepare('SELECT * FROM analysis_decisions WHERE id=?').get(String(id));
+    return row ? this._mapAnalysisDecision(row) : null;
+  }
+
+  listAnalysisDecisions(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 100 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new RangeError('limit должен быть от 1 до 1000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).trim().toUpperCase();
+    const status = options.status == null ? null : String(options.status).toUpperCase();
+    const fromAt = options.fromAt == null ? null : Number(options.fromAt);
+    const toAt = options.toAt == null ? null : Number(options.toAt);
+    if (asset && !asset.endsWith('_OTC')) throw new TypeError('Фильтр допускает только OTC-активы');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (status && !['SIGNAL', 'NO_SIGNAL'].includes(status)) throw new TypeError('Некорректный статус фильтра');
+    if (fromAt != null && (!Number.isSafeInteger(fromAt) || fromAt <= 0)) throw new TypeError('Некорректная начальная дата');
+    if (toAt != null && (!Number.isSafeInteger(toAt) || toAt <= 0)) throw new TypeError('Некорректная конечная дата');
+    if (fromAt != null && toAt != null && fromAt > toAt) throw new TypeError('Начальная дата позже конечной');
+    const rows = this.db.prepare(`
+      SELECT * FROM analysis_decisions
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+        AND (? IS NULL OR status=?) AND (? IS NULL OR decision_at>=?)
+        AND (? IS NULL OR decision_at<=?)
+      ORDER BY decision_at DESC, id LIMIT ?
+    `).all(asset, asset, timeframe, timeframe, status, status, fromAt, fromAt, toAt, toAt, limit);
+    return rows.map(row => this._mapAnalysisDecision(row));
+  }
+
+  recordTradeResult(input, now = Date.now()) {
+    this._assertOpen();
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Результат сделки должен быть объектом');
+    const createdAt = Number(now);
+    if (!Number.isSafeInteger(createdAt) || createdAt <= 0) throw new TypeError('Некорректное время записи результата');
+    const brokerIdValue = input.brokerTradeId == null ? '' : String(input.brokerTradeId).trim();
+    const brokerTradeId = brokerIdValue || null;
+    if (brokerTradeId && brokerTradeId.length > 128) throw new TypeError('brokerTradeId слишком длинный');
+    const assetValue = input.asset == null ? '' : String(input.asset).trim().toUpperCase();
+    const asset = assetValue || null;
+    if (asset && (asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset))) throw new TypeError('Некорректный актив результата сделки');
+    const timeframeValue = input.timeframe == null ? '' : String(input.timeframe).trim().toUpperCase();
+    const timeframe = timeframeValue || null;
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм результата сделки');
+    const directionValue = input.direction == null ? '' : String(input.direction).trim().toUpperCase();
+    const direction = directionValue || null;
+    if (direction && !['UP', 'DOWN'].includes(direction)) throw new TypeError('Некорректное направление результата сделки');
+    const accountMode = String(input.accountMode || 'UNKNOWN').toUpperCase();
+    if (!['DEMO', 'REAL', 'UNKNOWN'].includes(accountMode)) throw new TypeError('Некорректный режим счёта');
+    const amount = Number(input.amount), profit = Number(input.profit);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(profit)) throw new TypeError('Некорректная сумма или P/L сделки');
+    const result = String(input.result || '').toUpperCase();
+    if (!['WIN', 'LOSS', 'DRAW'].includes(result)) throw new TypeError('Некорректный исход сделки');
+    const closedAt = Number(input.closedAt);
+    if (!Number.isSafeInteger(closedAt) || closedAt <= 0) throw new TypeError('Некорректное время закрытия сделки');
+    const entryAt = input.entryAt == null ? null : Number(input.entryAt);
+    if (entryAt != null && (!Number.isSafeInteger(entryAt) || entryAt <= 0 || entryAt > closedAt)) throw new TypeError('Некорректное время открытия сделки');
+    const expiryValue = input.expirySeconds == null ? null : Number(input.expirySeconds);
+    const expirySeconds = expiryValue == null ? null : expiryValue;
+    if (expirySeconds != null && (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400)) throw new TypeError('Некорректная экспирация сделки');
+    const payoutRate = input.payoutRate == null ? null : Number(input.payoutRate);
+    if (payoutRate != null && (!Number.isFinite(payoutRate) || payoutRate < 0 || payoutRate > 1000)) throw new TypeError('Некорректный payout');
+    const balanceAfter = input.balanceAfter == null ? null : Number(input.balanceAfter);
+    if (balanceAfter != null && (!Number.isFinite(balanceAfter) || balanceAfter < 0)) throw new TypeError('Некорректный баланс после сделки');
+    const sourceEvent = String(input.sourceEvent || 'unknown').trim();
+    if (!sourceEvent || sourceEvent.length > 64) throw new TypeError('Некорректное имя события результата');
+    const identity = brokerTradeId ? 'broker:' + brokerTradeId : [
+      asset || '', timeframe || '', direction || '', accountMode, amount, profit, result,
+      entryAt || '', expirySeconds || '', entryAt == null ? Math.floor(closedAt / 1000) * 1000 : entryAt
+    ].join('|');
+    const eventKey = String(input.eventKey || crypto.createHash('sha256').update(identity).digest('hex')).trim();
+    if (!eventKey || eventKey.length > 256) throw new TypeError('Некорректный ключ события сделки');
+    const id = crypto.randomUUID();
+    const inserted = Number(this._insertTradeResult.run(
+      id, eventKey, brokerTradeId, asset, timeframe, direction, accountMode, amount, profit, result,
+      entryAt, closedAt, expirySeconds, payoutRate, balanceAfter, sourceEvent, createdAt
+    ).changes || 0) > 0;
+    const row = this.db.prepare('SELECT * FROM trade_results WHERE event_key=? OR (? IS NOT NULL AND broker_trade_id=?) ORDER BY created_at DESC LIMIT 1')
+      .get(eventKey, brokerTradeId, brokerTradeId);
+    return { inserted, duplicate: !inserted, record: row ? this._mapTradeResult(row) : null };
+  }
+
+  _mapTradeResult(row) {
+    return {
+      id: row.id, eventKey: row.event_key, brokerTradeId: row.broker_trade_id,
+      asset: row.asset, timeframe: row.timeframe, direction: row.direction,
+      accountMode: row.account_mode, amount: Number(row.amount), profit: Number(row.profit),
+      result: row.result, entryAt: row.entry_at == null ? null : Number(row.entry_at),
+      closedAt: Number(row.closed_at), expirySeconds: row.expiry_seconds == null ? null : Number(row.expiry_seconds),
+      payoutRate: row.payout_rate == null ? null : Number(row.payout_rate),
+      balanceAfter: row.balance_after == null ? null : Number(row.balance_after),
+      sourceEvent: row.source_event, createdAt: Number(row.created_at)
+    };
+  }
+
+  listTradeResults(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 100 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new RangeError('limit должен быть от 1 до 100000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).toUpperCase();
+    const direction = options.direction == null ? null : String(options.direction).toUpperCase();
+    const accountMode = options.accountMode == null ? null : String(options.accountMode).toUpperCase();
+    const result = options.result == null ? null : String(options.result).toUpperCase();
+    if (asset && (asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset))) throw new TypeError('Некорректный актив');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (direction && !['UP', 'DOWN'].includes(direction)) throw new TypeError('Некорректное направление');
+    if (accountMode && !['DEMO', 'REAL', 'UNKNOWN'].includes(accountMode)) throw new TypeError('Некорректный режим счёта');
+    if (result && !['WIN', 'LOSS', 'DRAW'].includes(result)) throw new TypeError('Некорректный исход');
+    const fromAt = options.fromAt == null ? null : Number(options.fromAt);
+    const toAt = options.toAt == null ? null : Number(options.toAt);
+    if (fromAt != null && (!Number.isSafeInteger(fromAt) || fromAt <= 0)) throw new TypeError('Некорректная начальная дата');
+    if (toAt != null && (!Number.isSafeInteger(toAt) || toAt <= 0)) throw new TypeError('Некорректная конечная дата');
+    if (fromAt != null && toAt != null && fromAt > toAt) throw new TypeError('Начальная дата позже конечной');
+    const rows = this.db.prepare(`
+      SELECT * FROM trade_results
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+        AND (? IS NULL OR direction=?) AND (? IS NULL OR account_mode=?)
+        AND (? IS NULL OR result=?) AND (? IS NULL OR closed_at>=?)
+        AND (? IS NULL OR closed_at<=?)
+      ORDER BY closed_at DESC, created_at DESC LIMIT ?
+    `).all(asset, asset, timeframe, timeframe, direction, direction, accountMode, accountMode,
+      result, result, fromAt, fromAt, toAt, toAt, limit);
+    return rows.map(row => this._mapTradeResult(row));
+  }
+
+  getTradeStatistics(options = {}) {
+    const records = this.listTradeResults({ ...options, limit: options.limit ?? 100_000 });
+    const summarize = items => {
+      const wins = items.filter(item => item.result === 'WIN').length;
+      const losses = items.filter(item => item.result === 'LOSS').length;
+      const draws = items.filter(item => item.result === 'DRAW').length;
+      const grossProfit = items.reduce((sum, item) => sum + Math.max(0, item.profit), 0);
+      const grossLoss = items.reduce((sum, item) => sum + Math.min(0, item.profit), 0);
+      const netProfit = grossProfit + grossLoss;
+      const resolved = wins + losses;
+      return {
+        total: items.length, wins, losses, draws,
+        winRate: resolved ? wins / resolved * 100 : null,
+        grossProfit, grossLoss, netProfit,
+        averageProfit: items.length ? netProfit / items.length : 0,
+        totalStake: items.reduce((sum, item) => sum + item.amount, 0)
+      };
+    };
+    const groupBy = selector => {
+      const groups = new Map();
+      for (const item of records) {
+        const key = selector(item);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      return [...groups.entries()].map(([key, items]) => ({ key, ...summarize(items) }))
+        .sort((a, b) => b.netProfit - a.netProfit || b.total - a.total || String(a.key).localeCompare(String(b.key)));
+    };
+    const chronological = records.slice().sort((a, b) => a.closedAt - b.closedAt || a.createdAt - b.createdAt);
+    const cumulativeByAccount = new Map();
+    const profitCurve = [];
+    const balanceHistory = [];
+    for (const item of chronological) {
+      const cumulative = (cumulativeByAccount.get(item.accountMode) || 0) + item.profit;
+      cumulativeByAccount.set(item.accountMode, cumulative);
+      profitCurve.push({ closedAt: item.closedAt, accountMode: item.accountMode, cumulativeProfit: cumulative });
+      if (item.balanceAfter != null) balanceHistory.push({ closedAt: item.closedAt, accountMode: item.accountMode, balance: item.balanceAfter });
+    }
+    return {
+      generatedAt: Date.now(), overall: summarize(records),
+      byAsset: groupBy(item => item.asset || 'UNKNOWN'),
+      byTimeframe: groupBy(item => item.timeframe || 'UNKNOWN'),
+      byDirection: groupBy(item => item.direction || 'UNKNOWN'),
+      byAccountMode: groupBy(item => item.accountMode),
+      byExpiry: groupBy(item => item.expirySeconds == null ? 'UNKNOWN' : String(item.expirySeconds)),
+      profitCurve, balanceHistory
+    };
+  }
+
+  getStats() {
+    this._assertOpen();
+    return {
+      candles: Number(this.db.prepare('SELECT COUNT(*) AS count FROM market_candles').get().count),
+      assets: Number(this.db.prepare('SELECT COUNT(DISTINCT asset) AS count FROM market_candles').get().count),
+      catalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog').get().count),
+      otcCatalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog WHERE is_otc=1').get().count),
+      manualExamples: Number(this.db.prepare('SELECT COUNT(*) AS count FROM manual_examples').get().count),
+      analysisDecisions: Number(this.db.prepare('SELECT COUNT(*) AS count FROM analysis_decisions').get().count),
+      tradeResults: Number(this.db.prepare('SELECT COUNT(*) AS count FROM trade_results').get().count),
+      schemaVersion: SCHEMA_VERSION
+    };
+  }
+
+  integrityCheck() {
+    this._assertOpen();
+    const row = this.db.prepare('PRAGMA quick_check').get();
+    return row ? Object.values(row)[0] === 'ok' : false;
+  }
+
+  close() {
+    if (this.closed) return;
+    try { this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); }
+    finally { this.db.close(); this.closed = true; }
+  }
+}
+
+module.exports = { MarketDataStore, SCHEMA_VERSION, validateCandle };

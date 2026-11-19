@@ -20,7 +20,7 @@
   <main class="main">
     <header class="topbar"><div><p class="eyebrow">DESKTOP CONTROL CENTER</p><h1 id="page-title">Главная</h1></div><div class="top-actions"><span class="pill" id="network-pill">Сеть: проверка</span><button class="icon-btn" id="refresh-btn" title="Обновить статус">↻</button></div></header>
     <section class="page active" id="page-home">
-      <div class="hero-card"><div><span class="eyebrow">POCKET OPTION SESSION</span><h2 id="site-title">Сайт не запущен</h2><p id="site-subtitle">Запусти Pocket Option, чтобы подключить постоянную сессию.</p></div><div class="hero-actions"><button class="btn primary" id="launch-site">Запустить Pocket Option</button><button class="btn secondary" id="reload-site" disabled>Перезагрузить</button></div></div>
+      <div class="hero-card"><div><span class="eyebrow">POCKET OPTION SESSION</span><h2 id="site-title">Сайт не запущен</h2><p id="site-subtitle">Запусти Pocket Option, чтобы подключить постоянную сессию.</p></div><div class="hero-actions"><button class="btn primary" id="launch-site">Запустить Pocket Option</button><button class="btn secondary" id="reload-site" disabled>Перезагрузить</button><button class="btn secondary" id="open-labeler">Разметка истории</button></div></div>
       <div class="stats-grid">
         <article class="stat-card"><span class="stat-label">АКТИВНЫЙ СЧЁТ</span><div class="stat-value" id="account-mode">DEMO</div><small id="account-hint">Ожидание данных сайта</small></article>
         <article class="stat-card balance-card"><span class="stat-label">ТЕКУЩИЙ БАЛАНС</span><div class="stat-value" id="balance-value">—</div><small id="balance-updated">Нет подтверждённых данных</small></article>
@@ -37,6 +37,9 @@
           <div class="health-line"><span>Интернет</span><b id="internet-state">Проверка…</b></div>
           <div class="health-line"><span>Pocket Option</span><b id="po-state">Не запущен</b></div>
           <div class="health-line"><span>Последний баланс</span><b id="balance-age">—</b></div>
+          <div class="health-line"><span>Рыночный поток</span><b id="market-state">Не подключён</b></div>
+          <div class="health-line"><span>Данные в памяти</span><b id="market-detail">0 активов / 0 свечей</b></div>
+          <div class="health-line"><span>Рыночная БД</span><b id="market-storage">Не инициализирована</b></div>
           <div class="health-line"><span>Автовосстановление</span><b class="good">Включено</b></div>
         </article>
       </div>

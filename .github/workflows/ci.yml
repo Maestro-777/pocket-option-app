@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -27,5 +31,19 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check
 
+      - name: Run unit tests
+        run: npm test
+
+      - name: Verify Electron SQLite runtime
+        run: npm run test:electron
+
       - name: Build Windows installer
         run: npm run dist
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-option-windows-installer-${{ github.sha }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

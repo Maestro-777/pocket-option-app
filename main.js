@@ -7,6 +7,12 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataHub } = require('./core/market-data');
+const { AssetCatalog } = require('./core/asset-catalog');
+const { MarketDataStore } = require('./core/market-data-store');
+const MarketDataCapture = require('./core/market-data-capture');
+const { analyzeSimilarity, evaluateWalkForward, validateOptions } = require('./core/similarity-engine');
+const DecisionScanner = require('./core/decision-scanner');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -20,6 +26,7 @@ const FULL_CHECK_INTERVAL = 5 * 60_000;
 let mainWindow = null;
 let siteWindow = null;
 let miniWindow = null;
+let labelerWindow = null;
 let tray = null;
 let quitting = false;
 let recoveryInProgress = false;
@@ -37,13 +44,27 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+let marketDataHub = null;
+let marketDataCapture = null;
+let marketDecisionScanner = null;
+let marketDataStore = null;
+let marketStatusPublishTimer = null;
+let marketPersistenceTimer = null;
+let marketPersistenceError = null;
+let persistedCatalogRevision = -1;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  similarityTopK: 10,
+  similarityMinSimilarity: 80,
+  similarityMinExamples: 3,
+  similarityMinDirectionVotes: 6,
+  similarityLookback: 30,
+  analysisTimeframes: ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15']
 };
 
 const userRoot = () => app.getPath('userData');
@@ -63,6 +84,29 @@ function log(level, message, data) {
 }
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch (_) {}
+  const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
+  const savedTimeframes = Array.isArray(settings.analysisTimeframes)
+    ? [...new Set(settings.analysisTimeframes.map(value => String(value).toUpperCase()).filter(value => allowed.includes(value)))]
+    : allowed;
+  settings.analysisTimeframes = savedTimeframes.length ? savedTimeframes : allowed;
+  try {
+    const config = validateOptions({
+      topK: settings.similarityTopK, minSimilarity: settings.similarityMinSimilarity,
+      minExamples: settings.similarityMinExamples, minDirectionVotes: settings.similarityMinDirectionVotes,
+      lookback: settings.similarityLookback
+    });
+    settings.similarityTopK = config.topK;
+    settings.similarityMinSimilarity = config.minSimilarity;
+    settings.similarityMinExamples = config.minExamples;
+    settings.similarityMinDirectionVotes = config.minDirectionVotes;
+    settings.similarityLookback = config.lookback;
+  } catch (_) {
+    settings.similarityTopK = 10;
+    settings.similarityMinSimilarity = 80;
+    settings.similarityMinExamples = 3;
+    settings.similarityMinDirectionVotes = 6;
+    settings.similarityLookback = 30;
+  }
 }
 function saveSettings() {
   fs.mkdirSync(userRoot(), { recursive: true });
@@ -81,6 +125,38 @@ function createMainWindow() {
   });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
+function createLabelerWindow() {
+  if (labelerWindow && !labelerWindow.isDestroyed()) {
+    labelerWindow.show();
+    labelerWindow.focus();
+    return labelerWindow;
+  }
+  labelerWindow = new BrowserWindow({
+    width: 1440, height: 920, minWidth: 1040, minHeight: 720,
+    show: false, title: 'Разметка исторических OTC-ситуаций',
+    backgroundColor: '#0b1020', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  labelerWindow.loadFile(path.join(__dirname, 'renderer', 'labeler.html')).catch(error => log('error', 'Не удалось открыть окно разметки', String(error)));
+  labelerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  labelerWindow.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('file://')) event.preventDefault(); });
+  labelerWindow.once('ready-to-show', () => labelerWindow && labelerWindow.show());
+  labelerWindow.on('closed', () => { labelerWindow = null; });
+  return labelerWindow;
+}
+
+function isTrustedDataWindowSender(event) {
+  const sender = event?.sender;
+  if (!sender) return false;
+  const allowed = (mainWindow && !mainWindow.isDestroyed() && sender === mainWindow.webContents) ||
+    (labelerWindow && !labelerWindow.isDestroyed() && sender === labelerWindow.webContents);
+  if (!allowed) return false;
+  try {
+    const url = new URL(event.senderFrame?.url || sender.getURL());
+    return url.protocol === 'file:';
+  } catch (_) { return false; }
+}
+
 function createMiniWindow() {
   if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
   miniWindow = new BrowserWindow({
@@ -131,12 +207,118 @@ function toggleWidget() {
   else miniWindow.show();
   refreshTrayMenu(); publishStatus();
 }
-function injectSiteBridge(win) {
-  try {
-    const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
-    win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
-  } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
+function scheduleMarketStatusPublish() {
+  if (marketStatusPublishTimer) return;
+  marketStatusPublishTimer = setTimeout(() => {
+    marketStatusPublishTimer = null;
+    publishStatus();
+  }, 500);
 }
+
+function attachMarketDataCapture(win) {
+  marketDataHub = new MarketDataHub();
+  const assetCatalog = new AssetCatalog();
+  if (marketDataStore) {
+    try {
+      const restoredCatalog = assetCatalog.restore(marketDataStore.listCatalog({ otcOnly: true }));
+      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(1000));
+      persistedCatalogRevision = assetCatalog.revision;
+      log('info', 'Исторические рыночные данные восстановлены', { restoredCatalog, ...restored });
+    } catch (error) {
+      marketPersistenceError = String(error);
+      log('error', 'Не удалось восстановить рыночные данные из SQLite', marketPersistenceError);
+    }
+  }
+  if (marketDecisionScanner) marketDecisionScanner.close();
+  marketDecisionScanner = marketDataStore ? new DecisionScanner({
+    marketDataHub, marketDataStore,
+    getSettings: () => settings,
+    log,
+    onDecision: decision => {
+      if (decision.status === 'SIGNAL') {
+        log('info', 'Автоматический анализ обнаружил совпадение', {
+          asset: decision.asset, timeframe: decision.timeframe, direction: decision.direction,
+          votes: decision.votes, averageSimilarity: decision.averageSimilarity
+        });
+      }
+      scheduleMarketStatusPublish();
+    }
+  }) : null;
+  if (!marketDecisionScanner) log('error', 'Фоновый анализ отключён: SQLite хранилище недоступно');
+  marketDataCapture = new MarketDataCapture({
+    debuggerApi: win.webContents.debugger,
+    marketDataHub,
+    assetCatalog,
+    log,
+    onTick: asset => marketDecisionScanner?.enqueue(asset),
+    onTradeResult: result => {
+      if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+      const resolved = result.asset ? assetCatalog.resolve(result.asset) : null;
+      if (resolved && !resolved.isOTC && !resolved.ambiguous) return false;
+      const balanceFresh = lastBalance && Date.now() - Number(lastBalance.ts) <= 60_000;
+      const balanceAccount = balanceFresh ? String(lastBalance.accountType || '').toUpperCase() : 'UNKNOWN';
+      const accountMode = result.accountMode === 'UNKNOWN' && ['DEMO', 'REAL'].includes(balanceAccount)
+        ? balanceAccount : result.accountMode;
+      const saved = marketDataStore.recordTradeResult({
+        ...result,
+        asset: resolved?.isOTC ? resolved.asset : null,
+        accountMode
+      });
+      if (saved.inserted) {
+        log('info', 'Получен и сохранён результат закрытой сделки Pocket Option', {
+          asset: saved.record.asset, timeframe: saved.record.timeframe, direction: saved.record.direction,
+          accountMode: saved.record.accountMode, result: saved.record.result, profit: saved.record.profit
+        });
+        scheduleMarketStatusPublish();
+      }
+      return true;
+    },
+    onStatus: scheduleMarketStatusPublish
+  });
+  marketDataCapture.attach().catch(error => log('error', 'Ошибка запуска захвата рыночных данных', String(error)));
+}
+
+function persistMarketDataSafely() {
+  if (!marketDataStore || !marketDataHub) return;
+  try {
+    const pending = marketDataHub.getDirtyCompletedCandles(Date.now());
+    if (pending.length) {
+      marketDataStore.upsertCandles(pending.map(item => item.candle));
+      marketDataHub.acknowledgePersisted(pending);
+    }
+    const catalog = marketDataCapture?.assetCatalog;
+    if (catalog && catalog.revision !== persistedCatalogRevision) {
+      marketDataStore.upsertCatalog(catalog.listAll());
+      persistedCatalogRevision = catalog.revision;
+    }
+    if (marketPersistenceError) {
+      marketPersistenceError = null;
+      log('info', 'Сохранение рыночных данных восстановлено');
+    }
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (message !== marketPersistenceError) log('error', 'Ошибка сохранения рыночных данных', message);
+    marketPersistenceError = message;
+  }
+}
+
+function getMarketDataStatus() {
+  return {
+    scanner: marketDecisionScanner ? marketDecisionScanner.getStatus() : { running: false, pendingAssets: 0, decisions: 0, signals: 0, noSignals: 0, errors: 0, skipped: 0 },
+    capture: marketDataCapture ? marketDataCapture.getStatus() : {
+      status: 'stopped', attached: false, activeSockets: 0, lastFrameAt: null,
+      lastTickAt: null, lastTickReceivedAt: null, lastError: null, rejectedTicks: 0,
+      protocol: { textFrames: 0, binaryFrames: 0, malformedFrames: 0, events: 0, ticks: 0 }
+    },
+    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0, dirtyCandles: 0 },
+    persistence: {
+      available: !!marketDataStore,
+      error: marketPersistenceError,
+      database: marketDataStore ? marketDataStore.getStats() : null
+    }
+  };
+}
+
 function launchSite() {
   if (siteWindow && !siteWindow.isDestroyed()) {
     siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return;
@@ -152,11 +334,11 @@ function launchSite() {
     }
   });
   siteWindow.webContents.setBackgroundThrottling(false);
+  attachMarketDataCapture(siteWindow);
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
-    injectSiteBridge(siteWindow); publishStatus();
+    publishStatus();
   });
-  siteWindow.webContents.on('dom-ready', () => injectSiteBridge(siteWindow));
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
   siteWindow.webContents.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
     if (isMainFrame && code !== -3) log('error', 'Ошибка загрузки Pocket Option', { code, description, url });
@@ -170,7 +352,16 @@ function launchSite() {
   });
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
-  siteWindow.on('closed', () => { siteWindow = null; refreshTrayMenu(); publishStatus(); });
+  siteWindow.on('closed', () => {
+    if (marketDecisionScanner) marketDecisionScanner.close();
+    marketDecisionScanner = null;
+    if (marketDataCapture) marketDataCapture.close();
+    persistMarketDataSafely();
+    marketDataCapture = null;
+    marketDataHub = null;
+    persistedCatalogRevision = -1;
+    siteWindow = null; refreshTrayMenu(); publishStatus();
+  });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) { shell.openExternal(url); }
     return { action: 'deny' };
@@ -197,6 +388,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
+    marketData: getMarketDataStatus(),
     reconnectAttempts, update: updateState
   };
 }
@@ -209,6 +401,11 @@ function publishStatus() {
 
 ipcMain.handle('app:get-status', () => getPublicStatus());
 ipcMain.handle('app:launch-site', () => { launchSite(); return { ok: true }; });
+ipcMain.handle('app:labeler:open', event => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) return { ok: false, reason: 'Недоверенный отправитель' };
+  createLabelerWindow();
+  return { ok: true };
+});
 ipcMain.handle('app:show-site', () => {
   if (!siteWindow || siteWindow.isDestroyed()) return { ok: false };
   siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return { ok: true };
@@ -222,6 +419,36 @@ ipcMain.handle('app:reload-site', async () => {
   await siteWindow.webContents.reload(); log('warn', 'Пользователь запросил перезагрузку Pocket Option'); return { ok: true };
 });
 ipcMain.handle('app:toggle-widget', () => { toggleWidget(); return { ok: true }; });
+ipcMain.handle('app:analysis-settings:save', (event, next) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  const input = next && typeof next === 'object' && !Array.isArray(next) ? next : {};
+  const config = validateOptions(input);
+  let selectedTimeframes = settings.analysisTimeframes;
+  if (input.analysisTimeframes != null) {
+    if (!Array.isArray(input.analysisTimeframes) || input.analysisTimeframes.length === 0) throw new TypeError('Выберите хотя бы один таймфрейм');
+    const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
+    selectedTimeframes = [...new Set(input.analysisTimeframes.map(value => String(value).toUpperCase()))];
+    if (selectedTimeframes.some(value => !allowed.includes(value))) throw new TypeError('Выбран неподдерживаемый таймфрейм');
+  }
+  settings.similarityTopK = config.topK;
+  settings.similarityMinSimilarity = config.minSimilarity;
+  settings.similarityMinExamples = config.minExamples;
+  settings.similarityMinDirectionVotes = config.minDirectionVotes;
+  settings.similarityLookback = config.lookback;
+  settings.analysisTimeframes = selectedTimeframes;
+  marketDecisionScanner?.invalidateExamples();
+  saveSettings();
+  log('info', 'Настройки поиска совпадений сохранены', {
+    topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback,
+    analysisTimeframes: selectedTimeframes
+  });
+  return {
+    topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback,
+    analysisTimeframes: [...settings.analysisTimeframes]
+  };
+});
 ipcMain.handle('app:settings:get', () => settings);
 ipcMain.handle('app:settings:save', (_event, next) => {
   if (!next || typeof next !== 'object') return settings;
@@ -272,8 +499,8 @@ async function waitForAccountMode(mode, timeoutMs) {
   while (Date.now() < until) {
     if (!siteWindow || siteWindow.isDestroyed()) return false;
     try {
-      const result = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true);
-      if (result && result.accountType === mode.toLowerCase() && result.balance != null) return true;
+      const result = lastBalance;
+      if (result && result.accountType === mode.toLowerCase() && result.balance != null && Date.now() - result.ts < 15000) return true;
     } catch (_) {}
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -291,7 +518,109 @@ ipcMain.on('site:balance', (event, payload) => {
   lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
   lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
 });
-ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
+ipcMain.handle('app:market:assets', event => {
+  if (!isTrustedDataWindowSender(event)) return [];
+  const liveAssets = marketDataCapture ? marketDataCapture.assetCatalog.listOTC() : [];
+  if (liveAssets.length) return liveAssets;
+  return marketDataStore ? marketDataStore.listCatalog({ otcOnly: true }) : [];
+});
+ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const symbol = String(asset || '').trim().toUpperCase();
+  if (!symbol.endsWith('_OTC')) throw new TypeError('Разметка разрешена только для OTC-активов');
+  return marketDataStore.getCandles(symbol, timeframe, {
+    limit: Math.min(1000, Math.max(1, Number(options?.limit) || 1000)),
+    fromAt: options?.fromAt, toAt: options?.toAt
+  });
+});
+ipcMain.handle('app:similarity:analyze', (event, asset, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataHub || !marketDataStore) throw new Error('Рыночные данные или SQLite хранилище недоступны');
+  const symbol = String(asset || '').trim().toUpperCase();
+  const period = String(timeframe || '').trim().toUpperCase();
+  if (!symbol.endsWith('_OTC')) throw new TypeError('Анализ разрешён только для OTC-активов');
+  const config = validateOptions(options);
+  const entryAt = Date.now();
+  const candles = marketDataHub.getCandles(symbol, period, { asOf: entryAt }).slice(-config.lookback);
+  const examples = marketDataStore.listManualExamples({ timeframe: period, limit: config.maxExamples });
+  const result = analyzeSimilarity({ timeframe: period, entryAt, candles, examples, options: config });
+  try {
+    marketDataStore.createAnalysisDecision({
+      asset: symbol, timeframe: period, decisionAt: entryAt, status: result.status,
+      direction: result.direction === 'NONE' ? null : result.direction,
+      reason: result.reason, paramsSnapshot: result.options, matches: result.matches,
+      votes: result.votes, averageSimilarity: result.averageSimilarity ?? null,
+      historical: result.historical, queryCandles: candles, algorithmVersion: 'shape-v1'
+    });
+  } catch (error) {
+    log('error', 'Не удалось сохранить решение в журнал', String(error?.message || error));
+    throw new Error('Анализ выполнен, но журнал решения не сохранён: ' + String(error?.message || error));
+  }
+  log('info', 'Выполнен поиск исторических совпадений', {
+    asset: symbol, timeframe: period, status: result.status, direction: result.direction || 'NONE',
+    matches: result.matches.length, qualified: result.qualifiedMatches.length, votes: result.votes
+  });
+  return result;
+});
+
+ipcMain.handle('app:similarity:backtest', (event, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище ручных примеров недоступно');
+  const period = String(timeframe || '').trim().toUpperCase();
+  const config = validateOptions(options);
+  const examples = marketDataStore.listManualExamples({ timeframe: period, limit: config.maxExamples });
+  const report = evaluateWalkForward(examples, config);
+  log('info', 'Выполнена хронологическая проверка similarity engine', {
+    timeframe: period, evaluated: report.evaluated, signals: report.signals,
+    accuracy: report.accuracy, coverage: report.coverage
+  });
+  return report;
+});
+
+ipcMain.handle('app:analysis-decisions:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище журнала недоступно');
+  return marketDataStore.listAnalysisDecisions(filters);
+});
+ipcMain.handle('app:trade-results:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+  return marketDataStore.listTradeResults(filters);
+});
+ipcMain.handle('app:trade-statistics:get', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+  return marketDataStore.getTradeStatistics(filters);
+});
+ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  return marketDataStore.listManualExamples(filters);
+});
+ipcMain.handle('app:manual-examples:create', (event, example) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const saved = marketDataStore.createManualExample(example);
+  marketDecisionScanner?.invalidateExamples();
+  log('info', 'Сохранён ручной исторический пример', { id: saved.id, asset: saved.asset, timeframe: saved.timeframe, direction: saved.direction });
+  return saved;
+});
+ipcMain.handle('app:manual-examples:update', (event, id, changes) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const updated = marketDataStore.updateManualExample(id, changes);
+  marketDecisionScanner?.invalidateExamples();
+  return updated;
+});
+ipcMain.handle('app:manual-examples:delete', (event, id) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
+  const deleted = marketDataStore.deleteManualExample(id);
+  marketDecisionScanner?.invalidateExamples();
+  return { deleted };
+});
+
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
 ipcMain.handle('app:logs:read', () => {
   try { return fs.readFileSync(logFile(), 'utf8').split(/\r?\n/).filter(Boolean).slice(-1000).map(line => { try { return JSON.parse(line); } catch (_) { return { message: line }; } }); }
@@ -420,8 +749,11 @@ async function runFullCheck(source) {
     try { responsive = await siteWindow.webContents.executeJavaScript('1 + 1', true) === 2; } catch (_) {}
     checks.push({ name: 'Окно сайта', ok: responsive, detail: responsive ? 'Renderer отвечает' : 'Renderer не отвечает' });
     checks.push({ name: 'Баланс и режим', ok: !!lastBalance && Date.now() - lastBalance.ts < 15000, detail: lastBalance ? lastBalance.accountType.toUpperCase() + ' / ' + Math.round((Date.now() - lastBalance.ts) / 1000) + ' сек. назад' : 'Нет подтверждённых данных адаптера' });
-    const bridge = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true).catch(() => null);
-    checks.push({ name: 'Адаптер Pocket Option', ok: !!bridge, detail: bridge ? 'Активен' : 'Не обнаружен' });
+    const bridgeActive = !!lastBalance && Date.now() - lastBalance.ts < 15000;
+    checks.push({ name: 'Адаптер Pocket Option', ok: bridgeActive, detail: bridgeActive ? 'Изолированный preload получает DOM-состояние' : 'Нет свежих данных адаптера' });
+    checks.push({ name: 'Хранилище рыночных данных', ok: !!marketDataStore && !marketPersistenceError, detail: marketDataStore ? (marketPersistenceError || 'SQLite доступна; свечей: ' + marketDataStore.getStats().candles) : 'SQLite недоступна' });
+    const captureReady = marketDataCapture?.status === 'listening';
+    checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketDataCapture?.lastError || marketDataCapture?.status || 'stopped') });
   } else checks.push({ name: 'Окно сайта', ok: true, detail: 'Не запускалось — это допустимо' });
   if (moduleManager) {
     const moduleChecks = await moduleManager.healthChecks();
@@ -435,7 +767,13 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
+  if (marketDecisionScanner) marketDecisionScanner.close();
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
+  if (marketStatusPublishTimer) clearTimeout(marketStatusPublishTimer);
+  if (marketPersistenceTimer) clearInterval(marketPersistenceTimer);
+  if (marketDataCapture) marketDataCapture.close();
+  persistMarketDataSafely();
+  if (marketDataStore) { try { marketDataStore.close(); } catch (error) { log('error', 'Не удалось закрыть SQLite хранилище', String(error)); } marketDataStore = null; }
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
@@ -446,11 +784,20 @@ const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
+  try {
+    marketDataStore = new MarketDataStore(path.join(userRoot(), 'market-data.sqlite'));
+    marketDataStore.pruneCandles(1000);
+    log('info', 'SQLite хранилище рыночных данных открыто', marketDataStore.getStats());
+  } catch (error) {
+    marketPersistenceError = String(error?.message || error);
+    log('error', 'SQLite хранилище рыночных данных недоступно', marketPersistenceError);
+  }
   loadSettings(); createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
   if (settings.showMiniWidget) createMiniWindow().show();
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
+  marketPersistenceTimer = setInterval(persistMarketDataSafely, 1000);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
