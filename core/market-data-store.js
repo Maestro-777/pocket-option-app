@@ -214,16 +214,18 @@ class MarketDataStore {
         affectedSeries.set(key, entry);
       }
       const pruneThreshold = Math.min(100, this.maxCandlesPerSeries);
+      const nextPruneCounters = new Map();
       for (const [key, entry] of affectedSeries) {
         const pending = (this._pruneCounters.get(key) || 0) + entry.count;
         if (pending >= pruneThreshold) {
           this._pruneCandleSeries.run(entry.asset, entry.timeframe, entry.asset, entry.timeframe, this.maxCandlesPerSeries);
-          this._pruneCounters.set(key, 0);
+          nextPruneCounters.set(key, 0);
         } else {
-          this._pruneCounters.set(key, pending);
+          nextPruneCounters.set(key, pending);
         }
       }
       this.db.exec('COMMIT');
+      for (const [key, value] of nextPruneCounters) this._pruneCounters.set(key, value);
       return changes;
     } catch (error) {
       try { this.db.exec('ROLLBACK'); } catch (_) {}
