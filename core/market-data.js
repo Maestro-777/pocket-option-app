@@ -22,7 +22,8 @@ function normalizeAssetName(raw) {
 
 function normalizeTimestamp(value, fallback) {
   const raw = Number(value);
-  if (!Number.isFinite(raw) || raw <= 0) return fallback || null;
+  if (value == null || value === '') return fallback || null;
+  if (!Number.isFinite(raw) || raw <= 0) return null;
   const timestamp = raw > 1e12 ? raw : raw * 1000;
   if (!Number.isFinite(timestamp) || timestamp > Date.now() + 5 * 60_000) return null;
   return timestamp;
