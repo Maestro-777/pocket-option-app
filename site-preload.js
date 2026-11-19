@@ -19,7 +19,7 @@ window.addEventListener('message', event => {
 
 
 // Market data is untrusted page data: only allowlisted event names and bounded arrays cross IPC.
-const MARKET_EVENTS = new Set(['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2']);
+const MARKET_EVENTS = new Set(['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2', 'successcloseOrder', 's_orders/close']);
 window.addEventListener('message', event => {
   if (event.source !== window || event.origin !== location.origin) return;
   const data = event.data;
