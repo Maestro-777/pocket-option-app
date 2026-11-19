@@ -2,6 +2,7 @@
 
 const { PocketOptionProtocol } = require('./pocketoption-protocol');
 const { AssetCatalog } = require('./asset-catalog');
+const { normalizeHistoryCandles } = require('./pocketoption-protocol');
 
 class MarketDataCapture {
   constructor(options = {}) {
@@ -90,8 +91,23 @@ class MarketDataCapture {
     const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
     if (decoded?.eventName === 'updateAssets') {
       const catalogResult = this.assetCatalog.ingest(decoded.payload);
-      this.log('info', 'Получен каталог активов Pocket Option', catalogResult);
+      if (catalogResult.accepted > 0) this.log('info', 'Получен каталог активов Pocket Option', catalogResult);
       this._notify();
+      return;
+    }
+    const history = normalizeHistoryCandles(decoded?.eventName, decoded?.payload);
+    if (history?.asset) {
+      this.rejectedHistoryRows += history.skippedRows || 0;
+      if (history.candles.length) {
+        const asset = this.assetCatalog.resolve(history.asset);
+        if (asset?.source === 'explicit-otc-suffix') this.assetCatalog.rememberExplicitOtc(history.asset);
+        if (asset?.isOTC && asset.asset) {
+          const result = this.marketDataHub.ingestHistoricalCandles(history.candles.map(candle => ({ ...candle, asset: asset.asset })));
+          if (result.accepted > 0) this._notify();
+        } else {
+          this.rejectedHistoryRows += history.candles.length;
+        }
+      }
       return;
     }
     if (!decoded?.ticks?.length) return;
