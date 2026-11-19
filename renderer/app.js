@@ -52,6 +52,11 @@ function renderStatus(status) {
     : status.site.running ? 'Подключение…' : 'Не запущен';
   const catalog = capture.catalog || {};
   $('market-detail').textContent = (health.assets || 0) + ' OTC активов · ' + (catalog.otc || 0) + ' в каталоге · ' + (health.candlesInMemory || 0) + ' свечей';
+  const persistence = market.persistence || {};
+  const database = persistence.database || {};
+  $('market-storage').textContent = !persistence.available ? 'Недоступна'
+    : persistence.error ? 'Ошибка записи'
+    : (database.candles || 0) + ' сохранённых свечей';
   $('connection-pill').textContent = status.site.running ? (status.account.stale ? 'Ожидание данных' : 'Подключено') : 'Нет данных';
   $('network-pill').textContent = 'Сеть: ' + (status.network.online === null ? 'проверка' : status.network.online ? 'доступна' : 'нет связи');
   $('side-status').textContent = status.site.running ? (status.account.stale ? 'Нет свежих данных' : 'Pocket Option подключён') : 'Сайт не запущен';
