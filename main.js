@@ -427,6 +427,7 @@ ipcMain.handle('app:analysis-settings:save', (event, next) => {
   settings.similarityMinDirectionVotes = config.minDirectionVotes;
   settings.similarityLookback = config.lookback;
   settings.analysisTimeframes = selectedTimeframes;
+  marketDecisionScanner?.invalidateExamples();
   saveSettings();
   log('info', 'Настройки поиска совпадений сохранены', {
     topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
