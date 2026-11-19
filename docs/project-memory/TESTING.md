@@ -69,10 +69,10 @@
 
 
 ## IPC validators — 2026-11-20
-- [x] Unit-тесты HTTPS Pocket Option host allow-list.
+- [x] Unit-тесты HTTPS Pocket Option host allow-list и sender identity binding (expected webContents + frame URL).
 - [x] Проверки balance payload: account type, finite nonnegative balance, timestamp freshness/future bound, monotonic timestamp, rate limit, currency length.
 - [x] Проверки market batch: allow-list event names, maximum item count, total/per-event payload size, timestamp clamping.
-- [x] Локальный прогон ipc-validation.test.js: 5 passed, 0 failed.
+- [x] Локальный прогон ipc-validation.test.js: 6 passed, 0 failed.
 - [ ] Electron integration test для фактического sender/webContents/frame binding.
 
 
@@ -80,3 +80,6 @@
 - [x] MarketDataStore.getAggregatedCandles delegates stored per-asset ticks to core/timeframes.js.
 - [x] Fixture verifies S5 OHLC aggregation, completed-candle filtering and asset isolation.
 - [x] Local combined run: 15 market-data + IPC validator tests passed; CI also runs the 5 timeframe tests.
+
+
+После подключения агрегации свечей и sender-frame validator локальный совместный прогон market-data + IPC tests: 16 passed, 0 failed. Полный CI после этих последних изменений ожидается.
