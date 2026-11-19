@@ -6,6 +6,15 @@ function assertSafePayload(value,depth=0){if(depth>20)throw new RangeError('Сл
 class DecisionJournal{
  constructor(filePath){if(!filePath||typeof filePath!=='string')throw new TypeError('Не указан путь журнала');this.filePath=path.resolve(filePath);this.queue=Promise.resolve();}
  append(type,payload,snapshot={}){return Promise.resolve().then(()=>this.appendMany([{type,payload,settingsSnapshot:snapshot}])).then(rows=>rows[0]);}
+ async readRecent(limit=100000,maxBytes=20971520){
+  if(!Number.isInteger(limit)||limit<1||limit>100000||!Number.isInteger(maxBytes)||maxBytes<1024||maxBytes>104857600)throw new RangeError('Недопустимый лимит чтения журнала');
+  let handle;try{handle=await fs.open(this.filePath,'r');}catch(error){if(error.code==='ENOENT')return[];throw error;}
+  try{const stat=await handle.stat();if(!stat.size)return[];const length=Math.min(stat.size,maxBytes),start=stat.size-length,buffer=Buffer.alloc(length);await handle.read(buffer,0,length,start);let text=buffer.toString('utf8');if(start>0){const firstNewline=text.indexOf('\\n');if(firstNewline<0)return[];text=text.slice(firstNewline+1);}
+   const lines=text.split(/\\r?\\n/).filter(Boolean).slice(-limit),events=[];
+   for(const line of lines){try{const event=JSON.parse(line);if(event&&typeof event==='object'&&typeof event.type==='string'&&event.payload&&typeof event.payload==='object')events.push(event);}catch(_){}}
+   return events;
+  }finally{await handle.close();}
+ }
  appendMany(items){
   if(!Array.isArray(items)||items.length>10000)return Promise.reject(new RangeError('appendMany принимает массив до 10000 событий'));
   const events=items.map(item=>{const t=String(item&&item.type||'').toUpperCase();if(!EVENT_TYPES.has(t))throw new TypeError('Неизвестный тип события журнала');const payload=item.payload??{},snapshot=item.settingsSnapshot??{};assertSafePayload(payload);assertSafePayload(snapshot);const event={id:crypto.randomUUID(),at:new Date().toISOString(),type:t,payload,settingsSnapshot:snapshot};const line=JSON.stringify(event)+'\n';if(Buffer.byteLength(line,'utf8')>1000000)throw new RangeError('Событие журнала превышает 1 МБ');return{event,line};});
