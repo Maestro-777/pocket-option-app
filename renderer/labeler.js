@@ -73,7 +73,7 @@ async function loadChart() {
   if (!asset) { candles = []; drawChart(); return; }
   setStatus('Загрузка истории…');
   try {
-    candles = await api.getMarketCandles(asset, timeframe, { limit: 300 }) || [];
+    candles = await api.getMarketCandles(asset, timeframe, { limit: 1000 }) || [];
     candles.sort((a, b) => a.startAt - b.startAt);
     $('bar-count').textContent = candles.length + ' свечей';
     $('chart-range').textContent = candles.length
