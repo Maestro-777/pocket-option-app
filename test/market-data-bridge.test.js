@@ -50,3 +50,16 @@ test('forwards only allowlisted fields from closed-trade events',()=>{
  assert.equal(messages.length,1);assert.equal(messages[0].data.eventName,'successcloseOrder');
  const deal=messages[0].data.payload[0].deals[0];assert.equal(deal.id,'broker-1');assert.equal(deal.asset,'EURUSD_otc');assert.equal(deal.profit,0.8);assert.equal(deal.password,undefined);
 });
+
+test('pause cancellation interrupts an asset switch before the trade button can be clicked',async()=>{
+ let clicks=0,sent=[];
+ class FakeWebSocket{constructor(){this.readyState=1;this.listeners={};}addEventListener(n,fn){(this.listeners[n] ||= []).push(fn);}send(data){sent.push(data);}emit(data){for(const fn of this.listeners.message||[])fn({data});}}
+ const active={textContent:'GBP/USD OTC',offsetParent:{},getAttribute:()=>null,getBoundingClientRect:()=>({width:20,height:10})};
+ const document={querySelector(selector){if(selector.includes('.assets-block__item--active'))return active;return null;},querySelectorAll(){return[];}};
+ const window={WebSocket:FakeWebSocket,postMessage(){},HTMLInputElement:function(){}};
+ const context={window,document,location:{origin:'https://pocketoption.com'},TextDecoder,TextEncoder,ArrayBuffer,Blob,Set,Proxy,Reflect,Uint8Array,JSON,Date,Event:function(){},MouseEvent:function(){},setTimeout,clearTimeout};
+ vm.runInNewContext(source,context);const ws=new window.WebSocket();ws.emit('42["updateStream",[["GBPUSD_otc",1700000000,1.2]]]');
+ const pending=window.__PT_TRADE_COMMAND__({version:1,tradeId:'cancel-me',asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1,expirySeconds:15,switchTimeoutMs:2000});
+ await new Promise(resolve=>setTimeout(resolve,20));assert.equal(window.__PT_CANCEL_TRADE_COMMAND__('cancel-me'),true);
+ const result=await pending;assert.equal(result.ok,false);assert.equal(result.reason,'cancelled_by_pause');assert.equal(clicks,0);assert.equal(sent.length,1);
+});
