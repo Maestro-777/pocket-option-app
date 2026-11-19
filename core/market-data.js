@@ -1,5 +1,7 @@
 'use strict';
 
+const { aggregateTicksToCandles } = require('./timeframes');
+
 const MAX_ASSETS = 300;
 const MAX_TICKS_PER_ASSET = 12_000;
 const MAX_CANDLES_PER_ASSET_PERIOD = 2_000;
@@ -225,6 +227,11 @@ class MarketDataStore {
     const state = this.assets.get(normalizeAssetName(asset));
     if (!state) return [];
     return state.ticks.slice(-Math.max(1, Math.min(5000, Number(limit) || 500))).map(tick => ({ ...tick }));
+  }
+  getAggregatedCandles(asset, timeframe, options = {}) {
+    const state = this.assets.get(normalizeAssetName(asset));
+    if (!state) return [];
+    return aggregateTicksToCandles(state.ticks, timeframe, options);
   }
   getCandles(asset, periodSec, limit = 500) {
     const state = this.assets.get(normalizeAssetName(asset));
