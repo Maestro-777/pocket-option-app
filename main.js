@@ -106,7 +106,7 @@ function createLabelerWindow() {
     backgroundColor: '#0b1020', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
-  labelerWindow.loadFile(path.join(__dirname, 'renderer', 'labeler.html'));
+  labelerWindow.loadFile(path.join(__dirname, 'renderer', 'labeler.html')).catch(error => log('error', 'Не удалось открыть окно разметки', String(error)));
   labelerWindow.once('ready-to-show', () => labelerWindow && labelerWindow.show());
   labelerWindow.on('closed', () => { labelerWindow = null; });
   return labelerWindow;
