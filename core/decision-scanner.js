@@ -1,6 +1,6 @@
 'use strict';
 
-const { analyzeSimilarity, validateOptions } = require('./similarity-engine');
+const { analyzeSimilarity, prepareExamples, validateOptions } = require('./similarity-engine');
 const { TIMEFRAME_MS } = require('./timeframes');
 
 class DecisionScanner {
@@ -75,12 +75,14 @@ class DecisionScanner {
     return validateOptions(options);
   }
 
-  _getExamples(timeframe, maxExamples) {
+  _getExamples(timeframe, config) {
+    const cacheKey = timeframe + '|' + config.lookback + '|' + config.maxExamples;
     const cached = this._examples.get(timeframe);
-    if (cached && cached.limit === maxExamples) return cached.items;
-    const items = this.marketDataStore.listManualExamples({ timeframe, limit: maxExamples });
-    this._examples.set(timeframe, { limit: maxExamples, items });
-    return items;
+    if (cached && cached.key === cacheKey) return cached.prepared;
+    const examples = this.marketDataStore.listManualExamples({ timeframe, limit: config.maxExamples });
+    const prepared = prepareExamples(examples, timeframe, config);
+    this._examples.set(timeframe, { key: cacheKey, prepared });
+    return prepared;
   }
 
   _restoreLastScanned(key, asset, timeframe) {
@@ -105,7 +107,7 @@ class DecisionScanner {
       const examples = this._getExamples(timeframe, config.maxExamples);
       let result;
       try {
-        result = analyzeSimilarity({ timeframe, entryAt: now, candles, examples, options: config });
+        result = analyzeSimilarity({ timeframe, entryAt: now, candles, preparedExamples: prepared.items, skippedExamples: prepared.skipped, options: config });
       } catch (error) {
         this.stats.errors++;
         this.log('error', 'Ошибка анализа рыночной ситуации', { asset, timeframe, error: String(error?.message || error) });
