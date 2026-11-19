@@ -14,3 +14,32 @@ test('forwards bounded historical candle payloads without rewriting OHLC fields'
  assert.equal(messages[0].data.eventName,'history/list/v2');
  assert.deepEqual(Array.from(messages[0].data.payload[0].history[0]),[1700000000,1.1,1.2,1.0,1.15]);
 });
+
+test('fails closed when no market socket is available for a trade command',async()=>{const{window}=setup();const result=await window.__PT_TRADE_COMMAND__({version:1,asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1,expirySeconds:15});assert.equal(result.ok,false);assert.equal(result.reason,'market_socket_not_ready');});
+test('submits only after the current DOM asset, amount and expiry are verified',async()=>{
+ const messages=[];let clicks=0,sent=[];
+ class FakeInput{constructor(){this._value='1';this.offsetParent={};}focus(){}dispatchEvent(){}get value(){return this._value;}set value(v){this._value=v;}}
+ class FakeWebSocket{constructor(){this.readyState=1;this.listeners={};}addEventListener(n,fn){(this.listeners[n] ||= []).push(fn);}send(data){sent.push(data);}emit(data){for(const fn of this.listeners.message||[])fn({data});}}
+ const active={textContent:'EUR/USD OTC',offsetParent:{},getAttribute:()=>null,getBoundingClientRect:()=>({width:20,height:10})};
+ const expiry={textContent:'00:00:15',offsetParent:{},getAttribute:()=>null};
+ const input=new FakeInput();
+ const button={offsetParent:{},classList:{contains:()=>false},getAttribute:()=>null,click(){clicks++;}};
+ const document={querySelector(selector){if(selector.includes('.assets-block__item--active'))return active;if(selector.includes('.block--expiration-inputs .value__val'))return expiry;if(selector.includes('input'))return input;if(selector==='.btn.btn-call')return button;return null;},querySelectorAll(){return[];}};
+ const window={WebSocket:FakeWebSocket,postMessage:(data,origin)=>messages.push({data,origin}),HTMLInputElement:FakeInput};
+ const context={window,document,location:{origin:'https://pocketoption.com'},TextDecoder,TextEncoder,ArrayBuffer,Blob,Set,Proxy,Reflect,Uint8Array,JSON,Date,Event:function(){},MouseEvent:function(){},setTimeout,clearTimeout};
+ vm.runInNewContext(source,context);
+ const ws=new window.WebSocket();ws.emit('42["updateStream",[["EURUSD_otc",1700000000,1.2]]]');
+ const result=await window.__PT_TRADE_COMMAND__({version:1,asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1.5,expirySeconds:15});
+ assert.equal(result.ok,true);assert.equal(result.confirmed,false);assert.equal(input.value,'1.5');assert.equal(clicks,1);assert.equal(sent.length,0);
+});
+test('does not click when the requested asset is not confirmed in the DOM',async()=>{
+ let clicks=0,sent=[];
+ class FakeWebSocket{constructor(){this.readyState=1;this.listeners={};}addEventListener(n,fn){(this.listeners[n] ||= []).push(fn);}send(data){sent.push(data);}emit(data){for(const fn of this.listeners.message||[])fn({data});}}
+ const active={textContent:'GBP/USD OTC',offsetParent:{},getAttribute:()=>null,getBoundingClientRect:()=>({width:20,height:10})};
+ const document={querySelector(selector){if(selector.includes('.assets-block__item--active'))return active;return null;},querySelectorAll(){return[];}};
+ const window={WebSocket:FakeWebSocket,postMessage(){},HTMLInputElement:function(){}};
+ const context={window,document,location:{origin:'https://pocketoption.com'},TextDecoder,TextEncoder,ArrayBuffer,Blob,Set,Proxy,Reflect,Uint8Array,JSON,Date,Event:function(){},MouseEvent:function(){},setTimeout,clearTimeout};
+ vm.runInNewContext(source,context);const ws=new window.WebSocket();ws.emit('42["updateStream",[["GBPUSD_otc",1700000000,1.2]]]');
+ const result=await window.__PT_TRADE_COMMAND__({version:1,asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1,expirySeconds:15,switchTimeoutMs:100});
+ assert.equal(result.ok,false);assert.equal(result.reason,'asset_switch_not_confirmed');assert.equal(clicks,0);assert.equal(sent.length,1);
+});
