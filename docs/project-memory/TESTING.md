@@ -15,7 +15,9 @@
 - [x] Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса и модульный менеджер.
 - [x] По исходникам 3.6.0 установлено: бинарные Socket.IO payload декодируются как UTF-8 JSON; updateStream/quotes/stream несут тики, в том числе нескольких активов.
 - [x] Локально на Node.js 22.16.0: `node --test` — 32 теста пройдены, 0 ошибок (временная локальная копия исходников).
-- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder и CDP capture adapter с mock debugger.
+- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder, CDP capture adapter и SQLite MarketDataStore.
+- [x] Проверка перезапуска/восстановления SQLite, транзакционного upsert, диапазонных запросов, schema version, dirty revision acknowledgement и backpressure.
+- [ ] Electron runtime smoke test (`npm run test:electron`) — ожидает результата Windows CI.
 - [x] OTC-фильтр: проверка явного OTC, normal assets, неизвестных символов и неоднозначных alias.
 - [x] Тесты покрывают таймфреймы, OHLC, поздние тики, ограничение памяти, pre-entry окно, изоляцию сокетов и обработку malformed frames.
 
@@ -28,6 +30,7 @@
 - [ ] интеграция с текущим Pocket Option.
 - [ ] end-to-end рыночные данные на живом Pocket Option.
 - [ ] Проверка CDP capture на Windows Electron 45.3.4.
+- [ ] Проверка SQLite write latency и memory footprint на реальном потоке OTC.
 - [ ] DEMO сделки.
 - [ ] REAL сделки.
 
