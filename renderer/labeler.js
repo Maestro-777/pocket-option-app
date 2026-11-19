@@ -187,7 +187,7 @@ function updateMarkSummary() {
   const start = marks.segmentStart, entry = marks.entryAt, end = marks.segmentEnd;
   $('mark-summary').textContent = 'Начало: ' + fmtTime(start) + ' · Вход: ' + fmtTime(entry) + ' · Конец: ' + fmtTime(end);
   $('selected-count').textContent = [start, entry, end].filter(value => value != null).length + ' / 3';
-  $('save-example').disabled = !candles.length || (!editingId && [start, entry, end].some(value => value == null));
+  $('save-example').disabled = !editingId && (!candles.length || [start, entry, end].some(value => value == null));
   drawChart();
 }
 
