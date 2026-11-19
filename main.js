@@ -329,8 +329,12 @@ function publishMarketDataStatus() {
 }
 ipcMain.on('site:market-data', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
-  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
+  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2', 'successcloseOrder', 's_orders/close'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
   try {
+    if (payload.eventName === 'successcloseOrder' || payload.eventName === 's_orders/close') {
+      if (tradeExecutionAdapter) tradeExecutionAdapter.handleCloseEvent(payload.payload).catch(error => log('error', 'Ошибка обработки результата сделки', String(error)));
+      return;
+    }
     const result = marketDataService.ingestEvent(payload.eventName, payload.payload);
     if (result.accepted > 0) publishMarketDataStatus();
   } catch (error) { log('warn', 'Некорректное сообщение рыночных данных', String(error)); }
