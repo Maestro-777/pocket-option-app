@@ -24,9 +24,13 @@ const api = {
   updateExample: request => ipcRenderer.invoke('app:examples:update', request || {}),
   removeExample: id => ipcRenderer.invoke('app:examples:remove', id),
   analyzeSituation: request => ipcRenderer.invoke('app:matcher:analyze', request || {}),
+  getAnalysisConfig: () => ipcRenderer.invoke('app:analysis:get-config'),
+  setAnalysisConfig: config => ipcRenderer.invoke('app:analysis:set-config', config || {}),
+  scanNow: () => ipcRenderer.invoke('app:analysis:scan-now'),
   onStatus: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:status', h); return () => ipcRenderer.removeListener('app:status', h); },
   onLog: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:log', h); return () => ipcRenderer.removeListener('app:log', h); },
   onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); },
-  onMarketData: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:market-data', h); return () => ipcRenderer.removeListener('app:market-data', h); }
+  onMarketData: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:market-data', h); return () => ipcRenderer.removeListener('app:market-data', h); },
+  onSignalDecision: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:signal-decision', h); return () => ipcRenderer.removeListener('app:signal-decision', h); }
 };
 contextBridge.exposeInMainWorld('pocketApp', api);
