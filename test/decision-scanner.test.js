@@ -47,7 +47,7 @@ function fixture() {
     similarityLookback: 3, analysisTimeframes: ['S5']
   };
   const scanner = new DecisionScanner({ marketDataHub: hub, marketDataStore: store, getSettings: () => settings });
-  return { scanner, decisions, live };
+  return { scanner, decisions, live, sample };
 }
 
 test('scans a queued OTC asset and persists a decision snapshot', async () => {
@@ -88,9 +88,10 @@ test('re-scans a closed candle when a late tick corrects its OHLC snapshot', asy
 });
 
 test('re-scans the same candle after the example dataset is invalidated', async () => {
-  const { scanner, decisions } = fixture();
+  const { scanner, decisions, sample } = fixture();
   scanner.enqueue('EURUSD_OTC');
   await new Promise(resolve => setTimeout(resolve, 300));
+  sample.updatedAt = Date.now() + 1;
   scanner.invalidateExamples();
   scanner.enqueue('EURUSD_OTC');
   await new Promise(resolve => setTimeout(resolve, 300));
