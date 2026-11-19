@@ -33,10 +33,10 @@ function rankCandidates(candidates){
  ).map((item,index)=>({...item,rank:index+1}));
 }
 class SignalScheduler{
- constructor({marketData,exampleStore,journal,stateStore,getConfig,onDecision,onError}={}){
+ constructor({marketData,exampleStore,journal,stateStore,getConfig,getOpenTradeCount,onDecision,onError}={}){
   if(!marketData||typeof marketData.listAssets!=='function'||typeof marketData.getCandles!=='function')throw new TypeError('Не передан MarketDataService');
   if(!exampleStore||typeof exampleStore.list!=='function')throw new TypeError('Не передан ExampleStore');
-  this.marketData=marketData;this.exampleStore=exampleStore;this.journal=journal||null;this.stateStore=stateStore||null;this.getConfig=typeof getConfig==='function'?getConfig:()=>({});this.onDecision=typeof onDecision==='function'?onDecision:()=>{};this.onError=typeof onError==='function'?onError:()=>{};
+  this.marketData=marketData;this.exampleStore=exampleStore;this.journal=journal||null;this.stateStore=stateStore||null;this.getOpenTradeCount=typeof getOpenTradeCount==='function'?getOpenTradeCount:()=>0;this.getConfig=typeof getConfig==='function'?getConfig:()=>({});this.onDecision=typeof onDecision==='function'?onDecision:()=>{};this.onError=typeof onError==='function'?onError:()=>{};
   this.timer=null;this.scanning=false;this.lastScanned=new Map();this.lastScanAt=null;this.lastError=null;this.lastSummary={scanned:0,signals:0};this.recentDecisions=[];
  }
  restoreProcessedDecisions(events=[]){
@@ -90,11 +90,11 @@ class SignalScheduler{
     }
    }
    let journalPersisted=!this.journal||!journalEvents.length;if(this.journal&&journalEvents.length){try{if(typeof this.journal.appendMany==='function')await this.journal.appendMany(journalEvents);else for(const item of journalEvents)await this.journal.append(item.type,item.payload,item.settingsSnapshot);journalPersisted=true;}catch(error){this.onError(error);}}if(this.stateStore&&journalPersisted&&decisions.length){try{await this.stateStore.save(this.lastScanned);}catch(error){this.onError(error);}}
-   const ranked=rankCandidates(candidates);
-   const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
+   const ranked=rankCandidates(candidates);let occupied=0;try{occupied=Math.max(0,Math.floor(Number(this.getOpenTradeCount())||0));}catch(error){this.onError(error);}const availableSlots=Math.max(0,config.maxOpenTrades-occupied);
+   const selected=ranked.slice(0,availableSlots).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
    const allDecisions=decisions.map(item=>{const rankedItem=rankedById.get(item.signalId);return rankedItem?{...rankedItem,withinConfiguredLimit:selected.includes(item.signalId)}:{...item,rank:null,withinConfiguredLimit:false};});
    const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),allDecisions,topCandidateSignalIds:selected,at:new Date().toISOString()};
-   this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};this.recentDecisions=allDecisions.concat(this.recentDecisions).slice(0,200);
+   this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length,availableSlots,occupiedSlots:occupied};this.recentDecisions=allDecisions.concat(this.recentDecisions).slice(0,200);
    for(const item of allDecisions){try{this.onDecision(item);}catch(error){this.onError(error);}}
    return result;
   }finally{this.scanning=false;}
