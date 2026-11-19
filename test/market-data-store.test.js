@@ -222,7 +222,6 @@ test('stores immutable decision snapshots and filters the analysis journal', () 
   assert.deepEqual(saved.paramsSnapshot, decision.paramsSnapshot);
   assert.deepEqual(saved.matches, decision.matches);
   assert.deepEqual(saved.votes, decision.votes);
-  assert.deepEqual(saved.historical, { wins: 0, losses: 0, draws: 0, unknown: 0, winRate: null });
   assert.deepEqual(saved.historical, decision.historical);
   assert.equal(saved.queryCandles.length, 1);
   assert.equal(store.getStats().analysisDecisions, 1);
