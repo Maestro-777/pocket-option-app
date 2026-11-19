@@ -149,7 +149,8 @@ function analyzeSimilarity(input) {
       sampleEntryAt + (Number.isFinite(sampleExpirySeconds) && sampleExpirySeconds > 0 ? sampleExpirySeconds * 1000 : 0)
     );
     if (!Number.isSafeInteger(sampleEntryAt) || sampleEntryAt >= entryAt ||
-        !Number.isSafeInteger(sampleSegmentEnd) || !Number.isSafeInteger(outcomeKnownAt) || outcomeKnownAt > entryAt) {
+        !Number.isSafeInteger(sampleSegmentEnd) || sampleSegmentEnd < sampleEntryAt ||
+        !Number.isSafeInteger(outcomeKnownAt) || outcomeKnownAt > entryAt) {
       skipped++; continue;
     }
     if (!['UP', 'DOWN'].includes(String(example.direction || '').toUpperCase())) { skipped++; continue; }
