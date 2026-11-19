@@ -619,7 +619,7 @@ class MarketDataStore {
     if (!sourceEvent || sourceEvent.length > 64) throw new TypeError('Некорректное имя события результата');
     const identity = brokerTradeId ? 'broker:' + brokerTradeId : [
       asset || '', timeframe || '', direction || '', accountMode, amount, profit, result,
-      entryAt || '', expirySeconds || '', closedAt
+      entryAt || '', expirySeconds || '', entryAt == null ? Math.floor(closedAt / 1000) * 1000 : entryAt
     ].join('|');
     const eventKey = String(input.eventKey || crypto.createHash('sha256').update(identity).digest('hex'));
     if (!eventKey || eventKey.length > 256) throw new TypeError('Некорректный ключ события сделки');
