@@ -189,7 +189,7 @@ test('filters manual examples by asset and timeframe and never mixes them with m
   store.close();
 });
 
-test('migrates schema version 1 to version 2 without losing market candles', () => {
+test('migrates schema version 1 to version 3 without losing market candles', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'po-market-migration-'));
   const file = path.join(directory, 'migration.sqlite');
   try {
@@ -198,11 +198,51 @@ test('migrates schema version 1 to version 2 without losing market candles', () 
     first.db.exec('DROP TABLE manual_examples; PRAGMA user_version = 1');
     first.close();
     const upgraded = new MarketDataStore(file);
-    assert.equal(upgraded.getStats().schemaVersion, 2);
+    assert.equal(upgraded.getStats().schemaVersion, 3);
     assert.equal(upgraded.getStats().manualExamples, 0);
     assert.equal(upgraded.getCandles('EURUSD_OTC', 'S5').length, 1);
     upgraded.close();
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('stores immutable decision snapshots and filters the analysis journal', () => {
+  const store = new MarketDataStore(':memory:');
+  const decision = {
+    id: 'decision-001', asset: 'EURUSD_OTC', timeframe: 'S5', decisionAt: 30000,
+    status: 'SIGNAL', direction: 'UP', reason: 'directional_consensus',
+    paramsSnapshot: { topK: 10, minSimilarity: 80, minExamples: 3, minDirectionVotes: 6, lookback: 30 },
+    matches: [{ id: 'sample-001', asset: 'GBPUSD_OTC', direction: 'UP', similarity: 91.2, outcome: 'WIN' }],
+    votes: { UP: 6, DOWN: 2 }, averageSimilarity: 89.5,
+    queryCandles: [candle({ startAt: 5000, endAt: 10000 })],
+    algorithmVersion: 'shape-v1'
+  };
+  const saved = store.createAnalysisDecision(decision, 31000);
+  assert.equal(saved.id, 'decision-001');
+  assert.deepEqual(saved.paramsSnapshot, decision.paramsSnapshot);
+  assert.deepEqual(saved.matches, decision.matches);
+  assert.deepEqual(saved.votes, decision.votes);
+  assert.equal(saved.queryCandles.length, 1);
+  assert.equal(store.getStats().analysisDecisions, 1);
+  assert.equal(store.listAnalysisDecisions({ asset: 'EURUSD_OTC', timeframe: 'S5' }).length, 1);
+  assert.equal(store.listAnalysisDecisions({ status: 'NO_SIGNAL' }).length, 0);
+  assert.throws(() => store.createAnalysisDecision({ ...decision, id: 'bad-1', status: 'NO_SIGNAL', direction: 'UP' }, 32000), /Направление не соответствует/);
+  assert.throws(() => store.createAnalysisDecision({ ...decision, id: 'bad-2', decisionAt: 33000 }, 32000), /время решения/);
+  store.close();
+});
+
+test('stores no-signal decisions with explicit reasons and no direction', () => {
+  const store = new MarketDataStore(':memory:');
+  const saved = store.createAnalysisDecision({
+    asset: 'GBPUSD_OTC', timeframe: 'M1', decisionAt: 60000,
+    status: 'NO_SIGNAL', direction: null, reason: 'insufficient_similar_examples',
+    paramsSnapshot: { topK: 10 }, matches: [], votes: { UP: 1, DOWN: 0 },
+    averageSimilarity: null, queryCandles: [], algorithmVersion: 'shape-v1'
+  }, 61000);
+  assert.equal(saved.status, 'NO_SIGNAL');
+  assert.equal(saved.direction, null);
+  assert.equal(saved.reason, 'insufficient_similar_examples');
+  assert.equal(store.listAnalysisDecisions({ timeframe: 'M1' }).length, 1);
+  store.close();
 });
 
 test('allows an entry point inside a candle while excluding that candle from input features', () => {
