@@ -48,3 +48,5 @@ https://github.com/Maestro-777/pocket-tracker/blob/main/3.6.0_0/ARCHITECTURE.md
 - Не считать UI-клик подтверждением открытия брокером: статус SUBMITTED_UNCONFIRMED до close-event.
 - Не разрешать мультисделочность >1 до подтверждения полей close-event, позволяющих однозначно сопоставить пару.
 - DOM selectors и протокол закрытия не считать проверенными без живого DEMO smoke test.
+
+- Ветка реализации дополнена CDP Network capture: отдельный decoder на каждый WebSocket, Socket.IO binary attachment support, OTC AssetCatalog и интеграция с MarketDataService. Page bridge оставлен для смены инструмента, истории, close events и fallback.
