@@ -12,7 +12,7 @@
 
 ## 2. Вторичный pocket-tracker 3.6.0
 - Manifest V3 Chrome extension.
-- `background.js` — service worker; `inject.js` — MAIN world; `content.js` — isolated UI; bridge-клиент — локальный Windows WebSocket bridge.
+- `background.js` — service worker; `inject.js` — MAIN world; `content.js` — isolated UI; bridge-клиент — локальный Windows Chromium DevTools Protocol WebSocket capture.
 - `inject.js` перехватывает WebSocket Pocket Option, обрабатывает Socket.IO JSON/MessagePack, updateAssets, updateStream/quotes, историю и результаты сделок.
 - `QuotexCore` анализирует примерно каждые 1.5 секунды; актив синхронизируется из DOM примерно каждые 800 мс.
 - `executeTrade()` управляет текущим торговым DOM. Архитектура не доказывает одновременное исполнение по всем парам.
@@ -85,3 +85,10 @@
 - REAL-исполнение запрещено. Автоторговля выключена при запуске и требует явного включения на подтверждённом DEMO-счёте.
 
 - `core/scan-state-store.js` атомарно сохраняет `asset|timeframe -> barEndAt`; при старте SignalScheduler объединяет это состояние с последними DECISION событиями из JSONL журнала, чтобы не повторять уже обработанные бары.
+
+### Захват нескольких WebSocket соединений
+- `core/market-data-capture.js` подключает Chromium DevTools Protocol Network domain до загрузки Pocket Option и обрабатывает WebSocket frames отдельно по requestId/socket.
+- `core/pocketoption-protocol.js` декодирует Socket.IO text frames и binary attachments; состояние pending binary attachment изолировано для каждого WebSocket.
+- `core/asset-catalog.js` подтверждает OTC-активы, хранит rawSymbol, разрешает только однозначные алиасы и отклоняет неоднозначные OTC/non-OTC base symbols.
+- Захваченные updateAssets/updateStream/quotes/stream идут напрямую в MarketDataService. Page bridge остаётся для смены инструмента через активный Socket.IO WebSocket, исторических событий и close events; при активном CDP потоке дублирующая отправка updateStream/updateAssets отключена.
+- Если CDP capture недоступен, используется page-bridge fallback; статус источника виден в панели рыночных данных.
