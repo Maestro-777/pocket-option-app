@@ -542,7 +542,7 @@ ipcMain.handle('app:similarity:analyze', (event, asset, timeframe, options = {})
       direction: result.direction === 'NONE' ? null : result.direction,
       reason: result.reason, paramsSnapshot: result.options, matches: result.matches,
       votes: result.votes, averageSimilarity: result.averageSimilarity ?? null,
-      queryCandles: candles, algorithmVersion: 'shape-v1'
+      historical: result.historical, queryCandles: candles, algorithmVersion: 'shape-v1'
     });
   } catch (error) {
     log('error', 'Не удалось сохранить решение в журнал', String(error?.message || error));
