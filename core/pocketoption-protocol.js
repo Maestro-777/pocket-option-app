@@ -87,14 +87,17 @@ function normalizeHistoryCandles(eventName, payload, options = {}) {
   return { asset: data.asset, timeframe, candles, skippedRows };
 }
 
-function normalizeStreamTicks(eventName, payload) {
+function normalizeStreamTicks(eventName, payload, receivedAt = Date.now()) {
   if (!['updateStream', 'quotes/stream'].includes(eventName)) return [];
   const rows = Array.isArray(payload) && (Array.isArray(payload[0]) || (payload[0] && typeof payload[0] === 'object')) ? payload : [payload];
+  const fallbackTime = Number(receivedAt);
+  if (!Number.isSafeInteger(fallbackTime) || fallbackTime <= 0) throw new TypeError('receivedAt должен быть Unix timestamp в миллисекундах');
+  const normalizeLiveTime = value => value == null || value === '' || Number(value) === 0 ? fallbackTime : toMilliseconds(value);
   const ticks = [];
   for (const row of rows) {
     if (Array.isArray(row)) {
       if (row.length < 3 || typeof row[0] !== 'string') continue;
-      const ts = toMilliseconds(row[1]), price = Number(row[2]);
+      const ts = normalizeLiveTime(row[1]), price = Number(row[2]);
       if (ts == null || !Number.isFinite(price) || price <= 0) continue;
       ticks.push({ asset: row[0], ts, price, sourceEvent: eventName });
       continue;
@@ -103,12 +106,12 @@ function normalizeStreamTicks(eventName, payload) {
     if (Array.isArray(row.prices)) {
       for (const point of row.prices) {
         if (!point || typeof point !== 'object') continue;
-        const ts = toMilliseconds(point.time ?? point.ts ?? point.timestamp), price = Number(point.price ?? point.p);
+        const ts = normalizeLiveTime(point.time ?? point.ts ?? point.timestamp), price = Number(point.price ?? point.p);
         if (ts != null && Number.isFinite(price) && price > 0) ticks.push({ asset: row.asset, ts, price, sourceEvent: eventName });
       }
       continue;
     }
-    const ts = toMilliseconds(row.time ?? row.ts ?? row.timestamp), price = Number(row.price ?? row.close);
+    const ts = normalizeLiveTime(row.time ?? row.ts ?? row.timestamp), price = Number(row.price ?? row.close);
     if (ts != null && Number.isFinite(price) && price > 0) ticks.push({ asset: row.asset, ts, price, sourceEvent: eventName });
   }
   return ticks;
