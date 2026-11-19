@@ -47,8 +47,9 @@ app.whenReady().then(async () => {
     await window.webContents.executeJavaScript('Promise.all([window.pocketApp.getTradeResults(), window.pocketApp.getTradeStatistics()])');
     window.destroy();
 
-    let spoofedBalanceReceived = false;
-    ipcMain.on('site:balance', () => { spoofedBalanceReceived = true; });
+    const receivedBalances = [];
+    const onSiteBalance = (_event, payload) => receivedBalances.push(payload);
+    ipcMain.on('site:balance', onSiteBalance);
     const siteWindow = new BrowserWindow({
       show: false,
       webPreferences: {
@@ -58,12 +59,21 @@ app.whenReady().then(async () => {
         sandbox: true
       }
     });
-    await siteWindow.loadURL('data:text/html,<html><body>isolated preload security smoke</body></html>');
+    const fixture = '<html><body><span class="js-balance-real-USD">123.45</span></body></html>';
+    await siteWindow.loadURL('data:text/html,' + encodeURIComponent(fixture));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (receivedBalances.length !== 1 || receivedBalances[0]?.accountType !== 'real' ||
+        receivedBalances[0]?.balance !== 123.45) {
+      throw new Error('Isolated site preload did not read and normalize the balance fixture');
+    }
     await siteWindow.webContents.executeJavaScript(
       "window.postMessage({type:'PT_PO_BALANCE',accountType:'real',balance:999999,ts:Date.now()}, '*')"
     );
     await new Promise(resolve => setTimeout(resolve, 150));
-    if (spoofedBalanceReceived) throw new Error('Page postMessage must not be able to forge privileged balance IPC');
+    if (receivedBalances.length !== 1 || receivedBalances[0].balance !== 123.45) {
+      throw new Error('Page postMessage must not be able to forge privileged balance IPC');
+    }
+    ipcMain.removeListener('site:balance', onSiteBalance);
     siteWindow.destroy();
 
     console.log('Electron SQLite, labeling renderer, and isolated site-preload security smoke tests passed');
