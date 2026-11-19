@@ -237,7 +237,7 @@ function attachMarketDataCapture(win) {
     }
   }
   if (marketDecisionScanner) marketDecisionScanner.close();
-  marketDecisionScanner = new DecisionScanner({
+  marketDecisionScanner = marketDataStore ? new DecisionScanner({
     marketDataHub, marketDataStore,
     getSettings: () => settings,
     log,
@@ -250,7 +250,8 @@ function attachMarketDataCapture(win) {
       }
       scheduleMarketStatusPublish();
     }
-  });
+  }) : null;
+  if (!marketDecisionScanner) log('error', 'Фоновый анализ отключён: SQLite хранилище недоступно');
   marketDataCapture = new MarketDataCapture({
     debuggerApi: win.webContents.debugger,
     marketDataHub,
