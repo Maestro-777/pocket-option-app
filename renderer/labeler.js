@@ -372,6 +372,11 @@ async function loadAnalysisSettings() {
   $('analysis-min-examples').value = String(saved.similarityMinExamples ?? 3);
   $('analysis-min-votes').value = String(saved.similarityMinDirectionVotes ?? 6);
   $('analysis-lookback').value = String(saved.similarityLookback ?? 30);
+  const selected = Array.isArray(saved.analysisTimeframes) && saved.analysisTimeframes.length
+    ? saved.analysisTimeframes : TIMEFRAMES;
+  document.querySelectorAll('.analysis-timeframe').forEach(input => {
+    input.checked = selected.includes(input.value);
+  });
 }
 
 function readAnalysisOptions() {
@@ -380,7 +385,8 @@ function readAnalysisOptions() {
     minSimilarity: Number($('analysis-threshold').value),
     minExamples: Number($('analysis-min-examples').value),
     minDirectionVotes: Number($('analysis-min-votes').value),
-    lookback: Number($('analysis-lookback').value)
+    lookback: Number($('analysis-lookback').value),
+    analysisTimeframes: [...document.querySelectorAll('.analysis-timeframe:checked')].map(input => input.value)
   };
 }
 
@@ -540,6 +546,17 @@ $('clear-marks').addEventListener('click', () => {
 $('save-example').addEventListener('click', saveExample);
 $('run-analysis').addEventListener('click', runSimilarityAnalysis);
 $('run-backtest').addEventListener('click', runSimilarityBacktest);
+document.querySelectorAll('.analysis-timeframe').forEach(input => {
+  input.addEventListener('change', async () => {
+    try {
+      await api.saveAnalysisSettings(readAnalysisOptions());
+      setStatus('Таймфреймы фонового анализа сохранены');
+    } catch (error) {
+      input.checked = !input.checked;
+      setStatus(error.message, true);
+    }
+  });
+});
 $('cancel-edit').addEventListener('click', resetForm);
 $('reload-chart').addEventListener('click', loadChart);
 $('refresh-all').addEventListener('click', reloadAll);
