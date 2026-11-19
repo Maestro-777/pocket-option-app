@@ -204,3 +204,12 @@ test('migrates schema version 1 to version 2 without losing market candles', () 
     upgraded.close();
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('allows an entry point inside a candle while excluding that candle from input features', () => {
+  const store = new MarketDataStore(':memory:');
+  const saved = store.createManualExample(manualExample({ entryAt: 12500 }), 30000);
+  assert.equal(saved.entryAt, 12500);
+  assert.equal(saved.inputCandles.every(item => item.endAt <= 12500), true);
+  assert.equal(saved.postCandles.some(item => item.startAt < 12500 && item.endAt > 12500), true);
+  store.close();
+});
