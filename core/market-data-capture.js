@@ -14,6 +14,7 @@ class MarketDataCapture {
     this.assetCatalog = options.assetCatalog || new AssetCatalog();
     this.log = typeof options.log === 'function' ? options.log : () => {};
     this.onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
+    this.onTick = typeof options.onTick === 'function' ? options.onTick : () => {};
     this.maxSockets = options.maxSockets == null ? 32 : Number(options.maxSockets);
     if (!Number.isInteger(this.maxSockets) || this.maxSockets < 1 || this.maxSockets > 1024) throw new RangeError('maxSockets должен быть целым числом от 1 до 1024');
     this.status = 'idle';
@@ -122,6 +123,8 @@ class MarketDataCapture {
       if (result.accepted) {
         this.lastTickAt = tick.ts;
         this.lastTickReceivedAt = Date.now();
+        try { this.onTick(asset.asset, tick); }
+        catch (error) { this.log('warn', 'Не удалось поставить актив в очередь анализа', String(error?.message || error)); }
       } else this.rejectedTicks++;
     }
     this._notify();
