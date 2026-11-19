@@ -190,7 +190,7 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
       : 'event:' + crypto.createHash('sha256').update(JSON.stringify([
           normalized.asset, normalized.timeframe, normalized.direction, normalized.accountMode,
           normalized.amount, normalized.profit, normalized.result, normalized.entryAt,
-          normalized.expirySeconds, normalized.closedAt
+          normalized.expirySeconds, normalized.entryAt == null ? Math.floor(normalized.closedAt / 1000) * 1000 : normalized.entryAt
         ])).digest('hex');
     results.push({ ...normalized, eventKey: identity });
   }
