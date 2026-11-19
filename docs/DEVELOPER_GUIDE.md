@@ -51,7 +51,10 @@ Pocket-Option-Background/
 | `preload.js` | Безопасный API `window.pocketApp` для renderer |
 | `site-preload.js` | Проверка сообщений от страницы и пересылка разрешённых payload в main |
 | `site-bridge.js` | DOM-адаптер Pocket Option, определение режима и баланса, heartbeat/MutationObserver |
-| `market-data-bridge.js` | Перехват разрешённых WebSocket событий, нормализация/ограничение payload, fail-closed DEMO trade command и отмена команды |
+| `market-data-bridge.js` | Page helper для changeSymbol, DOM-верификации DEMO-команды и fallback history/close events |
+| `core/market-data-capture.js` | CDP Network capture нескольких WebSocket соединений с раздельным decoder state |
+| `core/pocketoption-protocol.js` | Socket.IO text/binary decoder с привязкой binary attachments к конкретному socket |
+| `core/asset-catalog.js` | OTC asset catalog, rawSymbol, alias resolution и отказ при неоднозначности |
 | `core/market-data.js` | Приём тиков/истории, каталог активов, OHLC и раздельные данные по парам/таймфреймам |
 | `core/patterns.js`, `core/matcher.js` | Нормализация формы свечей, сравнение без абсолютной цены и без будущих данных |
 | `core/example-store.js` | Постоянное хранилище ручных исторических примеров |
@@ -434,8 +437,8 @@ exports.createModule = async context => ({
 
 ## 19. Core data flow и правила анализа
 
-1. `market-data-bridge.js` перехватывает только allowlisted WebSocket события и отправляет ограниченные payload через `site-preload.js`.
-2. `MarketDataService` нормализует OTC активы, хранит исходный raw symbol для переключения инструмента, агрегирует тики в OHLC и исключает незакрытые свечи по умолчанию.
+1. `MarketDataCapture` слушает Chromium DevTools Protocol Network.webSocketFrameReceived и ведёт отдельный Socket.IO decoder для каждого requestId. `AssetCatalog` разрешает OTC активы и неоднозначные алиасы.
+2. CDP capture передаёт updateAssets/updateStream/quotes/stream в `MarketDataService`; page bridge используется для changeSymbol, истории/close events и fallback. `MarketDataService` хранит canonical asset и raw platform symbol, агрегирует тики в OHLC.
 3. `SignalScheduler` сканирует только новые закрытые бары; повтор того же asset/timeframe/barEndAt в пределах процесса не запускается повторно.
 4. `matcher.js` сравнивает нормализованные формы, допускает совпадения между исходными парами, но никогда не смешивает таймфреймы. Входные признаки ограничены свечами до entryAt.
 5. Все решения, в том числе отказы, журналируются с settings snapshot. Ранжирование — лексикографическое: среднее сходство → число голосов → согласованность → исторический win rate.
