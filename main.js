@@ -7,7 +7,8 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
-const { MarketDataStore, SUPPORTED_EVENTS } = require('./core/market-data');
+const { MarketDataStore } = require('./core/market-data');
+const { isAllowedPocketOptionUrl, validateBalancePayload, validateMarketBatch } = require('./core/ipc-validation');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -292,49 +293,35 @@ async function waitForAccountMode(mode, timeoutMs, afterTs = 0) {
 }
 function isTrustedPocketOptionSender(event) {
   if (!siteWindow || event.sender !== siteWindow.webContents) return false;
-  try {
-    const frameUrl = event.senderFrame?.url || siteWindow.webContents.getURL();
-    const host = new URL(frameUrl).hostname;
-    return host === 'pocketoption.com' || host.endsWith('.pocketoption.com');
-  } catch (_) { return false; }
+  const frameUrl = event.senderFrame?.url || siteWindow.webContents.getURL();
+  return isAllowedPocketOptionUrl(frameUrl);
 }
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
-  if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
   const now = Date.now();
-  const ts = Number(payload.ts);
-  // The isolated preload normally forwards a fresh timestamp. Reject future/stale
-  // timestamps and bursts; this is freshness validation, not proof against a
-  // same-origin page script spoofing the postMessage bridge.
-  if (!Number.isFinite(ts) || ts > now + 2000 || now - ts > 10000) return;
-  if (now - lastBalanceMessageAt < 250) return;
-  if (ts < (lastBalance?.ts || 0)) return;
+  const normalized = validateBalancePayload(payload, {
+    now, lastMessageAt: lastBalanceMessageAt, lastTimestamp: lastBalance?.ts
+  });
+  if (!normalized) return;
   lastBalanceMessageAt = now;
-  lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || '').slice(0, 8), ts };
-  lastSiteSignalAt = now; selectedAccount = payload.accountType.toUpperCase(); publishStatus();
+  lastBalance = normalized;
+  lastSiteSignalAt = now; selectedAccount = normalized.accountType.toUpperCase(); publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
 ipcMain.on('site:market-batch', (event, batch) => {
-  if (!isTrustedPocketOptionSender(event) || !Array.isArray(batch) || batch.length > 8) return;
+  if (!isTrustedPocketOptionSender(event)) return;
   const now = Date.now();
   if (now - marketBatchWindowAt >= 1000) {
     marketBatchWindowAt = now;
     marketBatchCount = 0;
   }
   if (++marketBatchCount > 60) return;
-  let encoded;
-  try { encoded = JSON.stringify(batch); } catch (_) { return; }
-  if (!encoded || encoded.length > 512 * 1024) return;
+  const safeBatch = validateMarketBatch(batch, now);
+  if (!safeBatch.length) return;
 
   let accepted = 0;
-  for (const item of batch) {
-    if (!item || !SUPPORTED_EVENTS.has(item.eventName) || item.payload == null) continue;
-    let size;
-    try { size = JSON.stringify(item.payload).length; } catch (_) { continue; }
-    if (!Number.isFinite(size) || size > 256 * 1024) continue;
-    const receivedAt = Number(item.receivedAt);
-    const safeReceivedAt = Number.isFinite(receivedAt) && receivedAt <= now + 5000 && receivedAt >= now - 60_000 ? receivedAt : now;
-    const result = marketDataStore.ingest(item.eventName, item.payload, safeReceivedAt);
+  for (const item of safeBatch) {
+    const result = marketDataStore.ingest(item.eventName, item.payload, item.receivedAt);
     if (result.accepted) accepted++;
   }
   if (accepted) {
