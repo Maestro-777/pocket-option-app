@@ -13,6 +13,7 @@
 - [x] Добавить SQLite-хранилище закрытых свечей и каталога, транзакционные upsert и восстановление после перезапуска.
 - [x] Добавить dirty queue с revision acknowledgement и backpressure при недоступной БД.
 - [x] Добавить Electron runtime smoke test для встроенного `node:sqlite` в Windows CI.
+- [x] Добавить SQLite schema v2 и отдельную сущность ручных примеров с CRUD, независимыми input/post snapshots и защитой от future leakage.
 - [x] Подключить CDP capture к окну Pocket Option и добавить проверку в диагностику (runtime пока не подтверждён).
 - [ ] Полностью пройти main.js: IPC, окна, lifecycle, настройки, мониторинг.
 - [ ] Подтвердить запуск/сборку на Windows.
