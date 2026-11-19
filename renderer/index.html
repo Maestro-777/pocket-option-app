@@ -45,6 +45,11 @@
     <section class="page" id="page-monitor">
       <div class="page-intro"><h2>Мониторинг устойчивости</h2><p>Полная проверка выполняется автоматически каждые 5 минут. Проверка сети и восстановления — чаще.</p><button class="btn primary" id="run-check">Запустить проверку сейчас</button></div>
       <div id="check-summary" class="check-summary">Ожидание первой проверки</div><div id="check-list" class="check-list"></div>
+      <article class="panel-card">
+        <div class="panel-head"><div><h3>Рыночный поток · прототип</h3><p>Наблюдение за разрешёнными WebSocket-событиями. Торговые команды не отправляются.</p></div><span class="pill" id="market-stream-state">Нет данных</span></div>
+        <div id="market-data-summary" class="check-summary">Ожидание рыночных событий</div>
+        <div id="market-assets" class="check-list"><div class="empty">Поток ещё не получен</div></div>
+      </article>
     </section>
     <section class="page" id="page-logs">
       <div class="page-intro row-between"><div><h2>Журнал событий</h2><p>Ошибки, соединение, переключение счёта и проверки</p></div><button class="btn secondary" id="export-logs">Экспортировать ZIP</button></div>
