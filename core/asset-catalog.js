@@ -3,9 +3,9 @@
 function normalizeAsset(value, otcHint = false) {
   const raw = String(value || '').trim();
   if (!raw) return null;
-  const isOtc = otcHint || /\\bOTC\\b/i.test(raw) || /_OTC$/i.test(raw);
-  let base = raw.toUpperCase().replace(/\\bOTC\\b/gi, '').replace(/_OTC$/gi, '');
-  base = base.replace(/\\s+/g, '').replace(/[^A-Z0-9_]/g, '');
+  const isOtc = otcHint || /\bOTC\b/i.test(raw) || /_OTC$/i.test(raw);
+  let base = raw.toUpperCase().replace(/\bOTC\b/gi, '').replace(/_OTC$/gi, '');
+  base = base.replace(/\s+/g, '').replace(/[^A-Z0-9_]/g, '');
   if (!base || base.length > 64) return null;
   return isOtc ? base + '_OTC' : base;
 }
@@ -39,7 +39,7 @@ class AssetCatalog {
       if (!row || row.symbol == null) { ignored++; continue; }
       const symbolText = String(row.symbol).trim();
       const labelText = String(row.label ?? '').trim();
-      const asset = normalizeAsset(symbolText, /\\bOTC\\b/i.test(labelText));
+      const asset = normalizeAsset(symbolText, /\bOTC\b/i.test(labelText));
       if (!asset) { ignored++; continue; }
       const isOTC = asset.endsWith('_OTC');
       const base = asset.replace(/_OTC$/, '');
