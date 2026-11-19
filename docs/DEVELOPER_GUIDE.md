@@ -27,7 +27,6 @@ Pocket-Option-Background/
 ├── main.js
 ├── preload.js
 ├── site-preload.js
-├── site-bridge.js
 ├── renderer/
 │   ├── index.html
 │   ├── styles.css
