@@ -11,7 +11,7 @@ const { MarketDataHub } = require('./core/market-data');
 const { AssetCatalog } = require('./core/asset-catalog');
 const { MarketDataStore } = require('./core/market-data-store');
 const MarketDataCapture = require('./core/market-data-capture');
-const { analyzeSimilarity, validateOptions } = require('./core/similarity-engine');
+const { analyzeSimilarity, evaluateWalkForward, validateOptions } = require('./core/similarity-engine');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -461,6 +461,20 @@ ipcMain.handle('app:similarity:analyze', (event, asset, timeframe, options = {})
     matches: result.matches.length, qualified: result.qualifiedMatches.length, votes: result.votes
   });
   return result;
+});
+
+ipcMain.handle('app:similarity:backtest', (event, timeframe, options = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище ручных примеров недоступно');
+  const period = String(timeframe || '').trim().toUpperCase();
+  const config = validateOptions(options);
+  const examples = marketDataStore.listManualExamples({ timeframe: period, limit: config.maxExamples });
+  const report = evaluateWalkForward(examples, config);
+  log('info', 'Выполнена хронологическая проверка similarity engine', {
+    timeframe: period, evaluated: report.evaluated, signals: report.signals,
+    accuracy: report.accuracy, coverage: report.coverage
+  });
+  return report;
 });
 
 ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
