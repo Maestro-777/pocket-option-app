@@ -57,6 +57,8 @@
     <section class="analysis-panel">
       <div class="panel-title"><div><p class="eyebrow">PATTERN MATCHING</p><h2>Поиск похожих ситуаций</h2></div></div>
       <button id="run-analysis" class="button primary" type="button">Найти совпадения</button>
+      <button id="run-backtest" class="button secondary" type="button">Проверить на исторических примерах</button>
+      <div id="backtest-summary" class="analysis-summary">Хронологическая проверка оценивает сигналы только по примерам, размеченным раньше проверяемой ситуации.</div>
       <div id="analysis-summary" class="analysis-summary">Анализ использует только закрытые свечи до текущего момента и примеры того же таймфрейма по всем OTC-парам.</div>
       <div id="analysis-matches" class="analysis-matches"></div>
       <p class="form-footnote">Процент сходства показывает сходство формы графика, а не вероятность выигрыша. Результат пока информационный: сделки не открываются.</p>
