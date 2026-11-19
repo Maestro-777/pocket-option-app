@@ -207,12 +207,6 @@ function toggleWidget() {
   else miniWindow.show();
   refreshTrayMenu(); publishStatus();
 }
-function injectSiteBridge(win) {
-  try {
-    const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
-    win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
-  } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
-}
 function scheduleMarketStatusPublish() {
   if (marketStatusPublishTimer) return;
   marketStatusPublishTimer = setTimeout(() => {
@@ -343,9 +337,8 @@ function launchSite() {
   attachMarketDataCapture(siteWindow);
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
-    injectSiteBridge(siteWindow); publishStatus();
+    publishStatus();
   });
-  siteWindow.webContents.on('dom-ready', () => injectSiteBridge(siteWindow));
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
   siteWindow.webContents.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
     if (isMainFrame && code !== -3) log('error', 'Ошибка загрузки Pocket Option', { code, description, url });
@@ -506,8 +499,8 @@ async function waitForAccountMode(mode, timeoutMs) {
   while (Date.now() < until) {
     if (!siteWindow || siteWindow.isDestroyed()) return false;
     try {
-      const result = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true);
-      if (result && result.accountType === mode.toLowerCase() && result.balance != null) return true;
+      const result = lastBalance;
+      if (result && result.accountType === mode.toLowerCase() && result.balance != null && Date.now() - result.ts < 15000) return true;
     } catch (_) {}
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -757,8 +750,8 @@ async function runFullCheck(source) {
     try { responsive = await siteWindow.webContents.executeJavaScript('1 + 1', true) === 2; } catch (_) {}
     checks.push({ name: 'Окно сайта', ok: responsive, detail: responsive ? 'Renderer отвечает' : 'Renderer не отвечает' });
     checks.push({ name: 'Баланс и режим', ok: !!lastBalance && Date.now() - lastBalance.ts < 15000, detail: lastBalance ? lastBalance.accountType.toUpperCase() + ' / ' + Math.round((Date.now() - lastBalance.ts) / 1000) + ' сек. назад' : 'Нет подтверждённых данных адаптера' });
-    const bridge = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true).catch(() => null);
-    checks.push({ name: 'Адаптер Pocket Option', ok: !!bridge, detail: bridge ? 'Активен' : 'Не обнаружен' });
+    const bridgeActive = !!lastBalance && Date.now() - lastBalance.ts < 15000;
+    checks.push({ name: 'Адаптер Pocket Option', ok: bridgeActive, detail: bridgeActive ? 'Изолированный preload получает DOM-состояние' : 'Нет свежих данных адаптера' });
     checks.push({ name: 'Хранилище рыночных данных', ok: !!marketDataStore && !marketPersistenceError, detail: marketDataStore ? (marketPersistenceError || 'SQLite доступна; свечей: ' + marketDataStore.getStats().candles) : 'SQLite недоступна' });
     const captureReady = marketDataCapture?.status === 'listening';
     checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketDataCapture?.lastError || marketDataCapture?.status || 'stopped') });
