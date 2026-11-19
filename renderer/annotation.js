@@ -57,7 +57,9 @@
     $('trading-open-list').innerHTML = open.length ? open.map(t =>
       '<div class="log-entry"><b>' + esc(t.pair) + '</b><span>' + esc(t.timeframe) + '</span><span>' + esc(t.direction) +
       '</span><span>' + Number(t.amount).toFixed(2) + '</span><span>' + esc(t.status) + '</span><small>' +
-      esc(new Date(t.submittedAt).toLocaleString('ru-RU')) + '</small></div>'
+      esc(new Date(t.submittedAt).toLocaleString('ru-RU')) + '</small>' +
+      (t.status === 'UNKNOWN_AFTER_RESTART' ? '<button class="text-btn" data-resolve-not-opened="' + esc(t.tradeId) + '">Не открывалась</button><button class="text-btn" data-resolve-closed="' + esc(t.tradeId) + '">Закрыта вручную</button>' : '') +
+      '</div>'
     ).join('') : '<div class="empty">Открытых или ожидающих сделок нет</div>';
   }
 
@@ -366,6 +368,17 @@
   $('trading-save-config').addEventListener('click', () => saveTradingConfig().catch(e => { $('trading-state').textContent = String(e.message || e); }));
   $('trading-enable').addEventListener('click', () => toggleTrading().catch(e => { $('trading-state').textContent = String(e.message || e); }));
   $('trading-pause').addEventListener('click', () => toggleTradingPause().catch(e => { $('trading-state').textContent = String(e.message || e); }));
+  $('trading-open-list').addEventListener('click', async event => {
+    const notOpened = event.target.closest('[data-resolve-not-opened]');
+    const closed = event.target.closest('[data-resolve-closed]');
+    let request = null;
+    if (notOpened && window.confirm('Подтверждаешь, что эта сделка фактически НЕ была открыта?')) request = {tradeId:notOpened.dataset.resolveNotOpened,action:'not_opened'};
+    if (closed) {
+      const value = window.prompt('Введи фактический чистый результат сделки (прибыль положительным числом, убыток отрицательным):','0');
+      if (value != null && value.trim() !== '') request = {tradeId:closed.dataset.resolveClosed,action:'closed',profit:Number(value)};
+    }
+    if (request) { const result = await api.resolveTrade(request); $('trading-state').textContent = result && result.ok ? 'Запись сделки сверена.' : (result?.reason || 'Не удалось сверить сделку'); await loadTradingState(); }
+  });
   $('analysis-save').addEventListener('click', () => saveAnalysisConfig().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('analysis-scan-now').addEventListener('click', () => scanNow().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('annotation-load').addEventListener('click', () => loadCandles().catch(e => say(String(e.message || e))));
