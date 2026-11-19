@@ -1,5 +1,5 @@
 'use strict';
-const test=require('node:test'),assert=require('node:assert/strict');
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises');
 const {TradeExecutionAdapter}=require('../core/trade-execution'),{TradingGate}=require('../core/trading-gate');
 function signal(asset='EURUSD_OTC',id='signal-1'){return{signalId:id,asset,timeframe:'S5',decision:{accepted:true,direction:'UP',averageSimilarity:90,matches:[]}};}
 function setup(overrides={}){
