@@ -12,6 +12,7 @@ const { AssetCatalog } = require('./core/asset-catalog');
 const { MarketDataStore } = require('./core/market-data-store');
 const MarketDataCapture = require('./core/market-data-capture');
 const { analyzeSimilarity, evaluateWalkForward, validateOptions } = require('./core/similarity-engine');
+const DecisionScanner = require('./core/decision-scanner');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -45,6 +46,7 @@ let updateState = { status: 'idle', version: null, progress: 0, message: 'Про
 let moduleManager = null;
 let marketDataHub = null;
 let marketDataCapture = null;
+let marketDecisionScanner = null;
 let marketDataStore = null;
 let marketStatusPublishTimer = null;
 let marketPersistenceTimer = null;
@@ -210,11 +212,27 @@ function attachMarketDataCapture(win) {
       log('error', 'Не удалось восстановить рыночные данные из SQLite', marketPersistenceError);
     }
   }
+  if (marketDecisionScanner) marketDecisionScanner.close();
+  marketDecisionScanner = new DecisionScanner({
+    marketDataHub, marketDataStore,
+    getSettings: () => settings,
+    log,
+    onDecision: decision => {
+      if (decision.status === 'SIGNAL') {
+        log('info', 'Автоматический анализ обнаружил совпадение', {
+          asset: decision.asset, timeframe: decision.timeframe, direction: decision.direction,
+          votes: decision.votes, averageSimilarity: decision.averageSimilarity
+        });
+      }
+      scheduleMarketStatusPublish();
+    }
+  });
   marketDataCapture = new MarketDataCapture({
     debuggerApi: win.webContents.debugger,
     marketDataHub,
     assetCatalog,
     log,
+    onTick: asset => marketDecisionScanner?.enqueue(asset),
     onStatus: scheduleMarketStatusPublish
   });
   marketDataCapture.attach().catch(error => log('error', 'Ошибка запуска захвата рыночных данных', String(error)));
@@ -251,6 +269,7 @@ function persistMarketDataSafely() {
 
 function getMarketDataStatus() {
   return {
+    scanner: marketDecisionScanner ? marketDecisionScanner.getStatus() : { running: false, pendingAssets: 0, decisions: 0, signals: 0, noSignals: 0, errors: 0, skipped: 0 },
     capture: marketDataCapture ? marketDataCapture.getStatus() : {
       status: 'stopped', attached: false, activeSockets: 0, lastFrameAt: null,
       lastTickAt: null, lastTickReceivedAt: null, lastError: null, rejectedTicks: 0,
@@ -300,6 +319,8 @@ function launchSite() {
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('closed', () => {
+    if (marketDecisionScanner) marketDecisionScanner.close();
+    marketDecisionScanner = null;
     if (marketDataCapture) marketDataCapture.close();
     persistMarketDataSafely();
     marketDataCapture = null;
@@ -526,18 +547,23 @@ ipcMain.handle('app:manual-examples:create', (event, example) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
   const saved = marketDataStore.createManualExample(example);
+  marketDecisionScanner?.invalidateExamples();
   log('info', 'Сохранён ручной исторический пример', { id: saved.id, asset: saved.asset, timeframe: saved.timeframe, direction: saved.direction });
   return saved;
 });
 ipcMain.handle('app:manual-examples:update', (event, id, changes) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
-  return marketDataStore.updateManualExample(id, changes);
+  const updated = marketDataStore.updateManualExample(id, changes);
+  marketDecisionScanner?.invalidateExamples();
+  return updated;
 });
 ipcMain.handle('app:manual-examples:delete', (event, id) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
-  return { deleted: marketDataStore.deleteManualExample(id) };
+  const deleted = marketDataStore.deleteManualExample(id);
+  marketDecisionScanner?.invalidateExamples();
+  return { deleted };
 });
 
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
@@ -686,6 +712,7 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
+  if (marketDecisionScanner) marketDecisionScanner.close();
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
   if (marketStatusPublishTimer) clearTimeout(marketStatusPublishTimer);
   if (marketPersistenceTimer) clearInterval(marketPersistenceTimer);
