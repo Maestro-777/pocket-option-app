@@ -42,6 +42,15 @@ function renderStatus(status) {
   $('internet-state').textContent = status.network.online === null ? 'Проверка…' : status.network.online ? 'Доступен' : 'Нет соединения';
   $('po-state').textContent = !status.site.running ? 'Не запущен' : status.site.loading ? 'Загружается' : status.account.stale ? 'Нет свежих данных' : 'Подключён';
   $('balance-age').textContent = status.account.updatedAt ? Math.round((Date.now() - status.account.updatedAt) / 1000) + ' сек. назад' : '—';
+  const market = status.marketData || {};
+  const capture = market.capture || {};
+  const health = market.health || {};
+  $('market-state').textContent = capture.status === 'listening'
+    ? (capture.lastTickAt ? 'Получаем котировки' : 'Слушаем WebSocket')
+    : capture.status === 'unavailable' ? 'Недоступен (debugger занят)'
+    : capture.status === 'error' || capture.status === 'detached' ? 'Ошибка захвата'
+    : status.site.running ? 'Подключение…' : 'Не запущен';
+  $('market-detail').textContent = (health.assets || 0) + ' активов · ' + (health.candlesInMemory || 0) + ' свечей · ' + (health.acceptedTicks || 0) + ' тиков';
   $('connection-pill').textContent = status.site.running ? (status.account.stale ? 'Ожидание данных' : 'Подключено') : 'Нет данных';
   $('network-pill').textContent = 'Сеть: ' + (status.network.online === null ? 'проверка' : status.network.online ? 'доступна' : 'нет связи');
   $('side-status').textContent = status.site.running ? (status.account.stale ? 'Нет свежих данных' : 'Pocket Option подключён') : 'Сайт не запущен';
