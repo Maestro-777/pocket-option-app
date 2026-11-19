@@ -8,7 +8,7 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis",
     "pack": "electron-builder --dir --win",
-    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/labeler.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check core/asset-catalog.js && node --check core/candle-series.js && node --check core/market-data.js && node --check core/pocketoption-protocol.js && node --check core/market-data-capture.js && node --check core/market-data-store.js && node --check core/similarity-engine.js && node --check scripts/electron-runtime-smoke.js && node --check modules/manager.js && node --check modules/example/index.js",
+    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/labeler.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check core/asset-catalog.js && node --check core/candle-series.js && node --check core/market-data.js && node --check core/pocketoption-protocol.js && node --check core/market-data-capture.js && node --check core/market-data-store.js && node --check core/similarity-engine.js && node --check core/decision-scanner.js && node --check scripts/electron-runtime-smoke.js && node --check modules/manager.js && node --check modules/example/index.js",
     "test": "node --test",
     "test:electron": "electron scripts/electron-runtime-smoke.js"
   },
