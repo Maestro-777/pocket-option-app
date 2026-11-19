@@ -57,7 +57,12 @@ let settings = {
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  similarityTopK: 10,
+  similarityMinSimilarity: 80,
+  similarityMinExamples: 3,
+  similarityMinDirectionVotes: 6,
+  similarityLookback: 30
 };
 
 const userRoot = () => app.getPath('userData');
@@ -359,6 +364,24 @@ ipcMain.handle('app:reload-site', async () => {
   await siteWindow.webContents.reload(); log('warn', 'Пользователь запросил перезагрузку Pocket Option'); return { ok: true };
 });
 ipcMain.handle('app:toggle-widget', () => { toggleWidget(); return { ok: true }; });
+ipcMain.handle('app:analysis-settings:save', (event, next) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  const config = validateOptions(next);
+  settings.similarityTopK = config.topK;
+  settings.similarityMinSimilarity = config.minSimilarity;
+  settings.similarityMinExamples = config.minExamples;
+  settings.similarityMinDirectionVotes = config.minDirectionVotes;
+  settings.similarityLookback = config.lookback;
+  saveSettings();
+  log('info', 'Настройки поиска совпадений сохранены', {
+    topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback
+  });
+  return {
+    topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback
+  };
+});
 ipcMain.handle('app:settings:get', () => settings);
 ipcMain.handle('app:settings:save', (_event, next) => {
   if (!next || typeof next !== 'object') return settings;
