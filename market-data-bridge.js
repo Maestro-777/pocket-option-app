@@ -12,7 +12,7 @@ function publish(name,payload,ws){
  if(ws&&ws.readyState===1)activeSocket=ws;
  const rows=Array.isArray(payload)?payload:[payload];
  if(!rows.length||rows.length>MAX_ROWS)return;
- const safe=[];
+ const safe=[],bounded=v=>typeof v==='string'?v.slice(0,32):v;
  for(const row of rows){
   if(safe.length>=MAX_ROWS)break;
   if(name==='successcloseOrder'||name==='s_orders/close'){
@@ -31,8 +31,8 @@ function publish(name,payload,ws){
    const data=Array.isArray(row)?row[0]:row;
    if(data&&typeof data==='object'){
     const asset=data.asset||data.symbol,history=Array.isArray(data.history)?data.history:Array.isArray(data.data)?data.data:null;
-    if(typeof asset==='string'&&history&&history.length<=MAX_HISTORY){
-     const clean=history.map(item=>Array.isArray(item)?item.slice(0,5).map(v=>typeof v==='string'?v.slice(0,32):v):item&&typeof item==='object'?{time:item.time,t:item.t,ts:item.ts,timestamp:item.timestamp,open:item.open,o:item.o,high:item.high,h:item.h,low:item.low,l:item.l,close:item.close,c:item.c,price:item.price,p:item.p}:null).filter(Boolean);
+    if(typeof asset==='string'&&asset.length<=64&&history&&history.length<=MAX_HISTORY){
+     const clean=history.map(item=>Array.isArray(item)?item.slice(0,5).map(v=>typeof v==='string'?v.slice(0,32):v):item&&typeof item==='object'?{time:bounded(item.time),t:bounded(item.t),ts:bounded(item.ts),timestamp:bounded(item.timestamp),open:bounded(item.open),o:bounded(item.o),high:bounded(item.high),h:bounded(item.h),low:bounded(item.low),l:bounded(item.l),close:bounded(item.close),c:bounded(item.c),price:bounded(item.price),p:bounded(item.p)}:null).filter(Boolean);
      safe.push({asset,period:data.period,history:clean});
     }
    }
