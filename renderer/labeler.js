@@ -503,6 +503,57 @@ async function runSimilarityBacktest() {
   }
 }
 
+function renderLiveSignals(status) {
+  const scanner = status?.marketData?.scanner;
+  const list = $('live-signals');
+  list.replaceChildren();
+  const items = Array.isArray(scanner?.rankedSignals) ? scanner.rankedSignals : [];
+  $('live-signal-count').textContent = String(items.length);
+  $('live-scanner-status').textContent = !scanner?.running
+    ? 'Фоновый анализ не запущен. Откройте Pocket Option и дождитесь подключения WebSocket.'
+    : 'Сканер активен · очередь ' + scanner.pendingAssets + ' · таймфреймы: ' + (scanner.selectedTimeframes || []).join(', ') +
+      ' · решений: ' + scanner.decisions + ' · ошибок: ' + scanner.errors;
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = scanner?.running ? 'Пока нет подтверждённых сигналов. Анализ и журнал отказов продолжаются.' : 'Пока нет сигналов.';
+    list.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const card = document.createElement('article');
+    card.className = 'live-signal';
+    const rank = document.createElement('span');
+    rank.className = 'live-signal-rank';
+    rank.textContent = '#' + item.rank;
+    const main = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'live-signal-main';
+    title.textContent = item.asset + ' · ' + item.timeframe + ' · ' + (item.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ');
+    const meta = document.createElement('div');
+    meta.className = 'live-signal-meta';
+    const votes = item.votes || { UP: 0, DOWN: 0 };
+    const historical = item.historical?.winRate == null ? 'н/д' : item.historical.winRate.toFixed(1) + '%';
+    const consistency = item.ranking?.directionalConsistency == null ? 'н/д' : (item.ranking.directionalConsistency * 100).toFixed(1) + '%';
+    meta.textContent = 'Голоса ' + votes.UP + '/' + votes.DOWN + ' · согласованность ' + consistency +
+      ' · история ' + historical + ' · ' + fmtTime(item.decisionAt);
+    main.append(title, meta);
+    const score = document.createElement('span');
+    score.className = 'live-signal-score';
+    score.textContent = item.averageSimilarity == null ? '—' : item.averageSimilarity.toFixed(1) + '%';
+    card.append(rank, main, score);
+    list.append(card);
+  }
+}
+
+async function loadLiveSignals() {
+  try {
+    renderLiveSignals(await api.getStatus());
+  } catch (error) {
+    $('live-scanner-status').textContent = error.message;
+  }
+}
+
 function renderDecisionJournal(items) {
   const list = $('decision-journal');
   list.replaceChildren();
@@ -634,5 +685,7 @@ fillTimeframes();
 resizeCanvas();
 reloadAll().catch(error => setStatus(error.message, true));
 setInterval(loadDecisionJournal, 5000);
+loadLiveSignals();
+setInterval(loadLiveSignals, 3000);
 setInterval(loadRankedSignals, 1500);
 loadRankedSignals();
