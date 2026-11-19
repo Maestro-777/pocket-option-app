@@ -590,13 +590,17 @@ class MarketDataStore {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Результат сделки должен быть объектом');
     const createdAt = Number(now);
     if (!Number.isSafeInteger(createdAt) || createdAt <= 0) throw new TypeError('Некорректное время записи результата');
-    const brokerTradeId = input.brokerTradeId == null || input.brokerTradeId === '' ? null : String(input.brokerTradeId).trim();
+    const brokerIdValue = input.brokerTradeId == null ? '' : String(input.brokerTradeId).trim();
+    const brokerTradeId = brokerIdValue || null;
     if (brokerTradeId && brokerTradeId.length > 128) throw new TypeError('brokerTradeId слишком длинный');
-    const asset = input.asset == null || input.asset === '' ? null : String(input.asset).trim().toUpperCase();
+    const assetValue = input.asset == null ? '' : String(input.asset).trim().toUpperCase();
+    const asset = assetValue || null;
     if (asset && (asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset))) throw new TypeError('Некорректный актив результата сделки');
-    const timeframe = input.timeframe == null || input.timeframe === '' ? null : String(input.timeframe).toUpperCase();
+    const timeframeValue = input.timeframe == null ? '' : String(input.timeframe).trim().toUpperCase();
+    const timeframe = timeframeValue || null;
     if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм результата сделки');
-    const direction = input.direction == null || input.direction === '' ? null : String(input.direction).toUpperCase();
+    const directionValue = input.direction == null ? '' : String(input.direction).trim().toUpperCase();
+    const direction = directionValue || null;
     if (direction && !['UP', 'DOWN'].includes(direction)) throw new TypeError('Некорректное направление результата сделки');
     const accountMode = String(input.accountMode || 'UNKNOWN').toUpperCase();
     if (!['DEMO', 'REAL', 'UNKNOWN'].includes(accountMode)) throw new TypeError('Некорректный режим счёта');
@@ -615,13 +619,13 @@ class MarketDataStore {
     if (payoutRate != null && (!Number.isFinite(payoutRate) || payoutRate < 0 || payoutRate > 1000)) throw new TypeError('Некорректный payout');
     const balanceAfter = input.balanceAfter == null ? null : Number(input.balanceAfter);
     if (balanceAfter != null && (!Number.isFinite(balanceAfter) || balanceAfter < 0)) throw new TypeError('Некорректный баланс после сделки');
-    const sourceEvent = String(input.sourceEvent || 'unknown');
+    const sourceEvent = String(input.sourceEvent || 'unknown').trim();
     if (!sourceEvent || sourceEvent.length > 64) throw new TypeError('Некорректное имя события результата');
     const identity = brokerTradeId ? 'broker:' + brokerTradeId : [
       asset || '', timeframe || '', direction || '', accountMode, amount, profit, result,
       entryAt || '', expirySeconds || '', entryAt == null ? Math.floor(closedAt / 1000) * 1000 : entryAt
     ].join('|');
-    const eventKey = String(input.eventKey || crypto.createHash('sha256').update(identity).digest('hex'));
+    const eventKey = String(input.eventKey || crypto.createHash('sha256').update(identity).digest('hex')).trim();
     if (!eventKey || eventKey.length > 256) throw new TypeError('Некорректный ключ события сделки');
     const id = crypto.randomUUID();
     const inserted = Number(this._insertTradeResult.run(
