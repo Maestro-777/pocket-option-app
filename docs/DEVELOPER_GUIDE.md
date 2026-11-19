@@ -1,7 +1,7 @@
 # Руководство разработчика — Pocket Option Background
 
 **Версия документа:** 1.0  
-**Версия приложения:** 0.1.0  
+**Версия приложения:** 0.1.1  
 **Стек:** Electron, Node.js, HTML, CSS, JavaScript  
 **Целевая платформа первой версии:** Windows 11 x64  
 **Статус реализации:** исходный код создан; установка зависимостей, запуск на Windows 11, интеграция с актуальным DOM Pocket Option и сборка установщика ещё должны быть проверены.
@@ -14,7 +14,7 @@ Pocket Option Background — отдельное Electron-приложение в
 
 1. **Main process (`main.js`)** — окна, жизненный цикл, трей, настройки, журналы, мониторинг, восстановление, обновления и IPC.
 2. **Renderer processes (`renderer/`)** — пользовательская панель и мини-виджет. Node.js API напрямую им не предоставляется.
-3. **Интеграция сайта (`site-preload.js`, `site-bridge.js`)** — ограниченный мост для передачи сведений о балансе и технических событиях из окна Pocket Option в главный процесс.
+3. **Интеграция сайта (`site-preload.js`, `site-bridge.js`)** — DOM-адаптер баланса и data-only наблюдатель рыночных WebSocket-событий.
 
 Обмен между renderer и main организован через `preload.js` и `contextBridge`.
 
@@ -48,14 +48,14 @@ Pocket-Option-Background/
 |---|---|
 | `main.js` | Главный процесс, окна, трей, IPC, настройки, логи, проверки, восстановление, переключение счёта, updater |
 | `preload.js` | Безопасный API `window.pocketApp` для renderer |
-| `site-preload.js` | Проверка сообщений от страницы и пересылка разрешённых payload в main |
+| `site-preload.js` | Проверка сообщений страницы, документ-старт WebSocket tap и пересылка разрешённых market-data batch в main |
 | `site-bridge.js` | DOM-адаптер Pocket Option, определение режима и баланса, heartbeat/MutationObserver |
 | `renderer/index.html` | Разметка главной панели и разделов |
 | `renderer/styles.css` | Тема и стили главного окна и виджета |
-| `renderer/app.js` | Отрисовка состояния, действия пользователя, фильтрация журналов |
+| `renderer/app.js` | Отрисовка состояния, диагностики рыночного потока, действия пользователя, фильтрация журналов |
 | `renderer/widget.html` | Разметка мини-виджета |
 | `renderer/widget.js` | Отображение статуса и действия мини-виджета |
-| `modules/manager.js` | Загрузка, health-check и остановка дополнительных модулей |
+| `core/market-data.js` | Нормализация и ограниченное in-memory хранение событий/тиков/OHLC по активам |\n| `core/timeframes.js` | Агрегация таймфреймов и pre-entry выборка |\n| `test/market-data.test.js` | Unit-тесты рыночного адаптера |\n| `modules/manager.js` | Загрузка, health-check и остановка дополнительных модулей |
 | `modules/example/` | Отключённый пример интерфейса модуля |
 
 ## 3. Зависимости и команды
@@ -78,7 +78,7 @@ npm run dist
 ```
 
 - `npm install` устанавливает зависимости.
-- `npm run check` запускает `node --check` для перечисленных JS-файлов. Это синтаксическая проверка, не тест интеграции.
+- `npm run check` запускает `node --check` для перечисленных JS-файлов. Это синтаксическая проверка, не тест интеграции.\n- `npm test` запускает unit-тесты Node.js через `node --test`.
 - `npm start` запускает Electron из исходников.
 - `npm run pack` собирает распакованный каталог приложения для Windows.
 - `npm run dist` собирает Windows NSIS installer x64 в каталоге `dist/`.
@@ -191,7 +191,7 @@ Main process считает баланс устаревшим, если посл
 
 - версию приложения и uptime;
 - состояние окна сайта (running, visible, loading, url);
-- сетевой статус и время проверки;
+- сетевой статус и время проверки;\n- диагностический snapshot рыночного потока: число событий/тиков, число активов, число элементов каталога и последние наблюдавшиеся цены (ограниченный список);
 - активный тип счёта, баланс, валюту, timestamp и stale-флаг;
 - состояние виджета;
 - число попыток восстановления;
@@ -212,7 +212,7 @@ Renderer получает начальное состояние через `getS
 | `reconnectAttemptsBeforeReload` | 3 | 1–10 |
 | `reconnectDelaySeconds` | 30 | 5–300 |
 | `maxReloadsPer10Minutes` | 3 | 1–5 |
-| `autoCheckUpdates` | `false` | boolean |
+| `autoCheckUpdates` | `true` | boolean |
 
 Файл: `<userData>/settings.json`.
 
