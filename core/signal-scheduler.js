@@ -39,6 +39,15 @@ class SignalScheduler{
   this.marketData=marketData;this.exampleStore=exampleStore;this.journal=journal||null;this.getConfig=typeof getConfig==='function'?getConfig:()=>({});this.onDecision=typeof onDecision==='function'?onDecision:()=>{};this.onError=typeof onError==='function'?onError:()=>{};
   this.timer=null;this.scanning=false;this.lastScanned=new Map();this.lastScanAt=null;this.lastError=null;this.lastSummary={scanned:0,signals:0};this.recentDecisions=[];
  }
+ restoreProcessedDecisions(events=[]){
+  if(!Array.isArray(events))throw new TypeError('events должен быть массивом');
+  const decisions=events.filter(event=>event&&event.type==='DECISION'&&event.payload&&typeof event.payload==='object');
+  const restored=[];
+  for(const event of decisions){const p=event.payload,asset=String(p.asset||''),timeframe=String(p.timeframe||'').toUpperCase(),barEndAt=Number(p.barEndAt);if(!asset||!Object.prototype.hasOwnProperty.call(TIMEFRAME_MS,timeframe)||!Number.isFinite(barEndAt)||barEndAt<=0)continue;const key=asset+'|'+timeframe;this.lastScanned.set(key,Math.max(this.lastScanned.get(key)||0,barEndAt));restored.push({...p,rank:null,withinConfiguredLimit:false,restored:true,journalAt:event.at||null});}
+  this.recentDecisions=restored.slice(-200).reverse().concat(this.recentDecisions).slice(0,200);
+  if(decisions.length)this.lastScanAt=decisions[decisions.length-1].at||this.lastScanAt;
+  return{restored:restored.length,trackedBars:this.lastScanned.size};
+ }
  start(){if(this.timer)return false;const config=normalizeSchedulerConfig(this.getConfig());this.timer=setInterval(()=>this.scan().catch(error=>{this.lastError=String(error.message||error);this.onError(error);}),config.scanIntervalMs);this.scan().catch(error=>{this.lastError=String(error.message||error);this.onError(error);});return true;}
  stop(){if(!this.timer)return false;clearInterval(this.timer);this.timer=null;return true;}
  async scan(){
