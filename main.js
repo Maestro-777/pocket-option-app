@@ -257,6 +257,24 @@ function attachMarketDataCapture(win) {
     assetCatalog,
     log,
     onTick: asset => marketDecisionScanner?.enqueue(asset),
+    onTradeResult: result => {
+      if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+      const resolved = result.asset ? assetCatalog.resolve(result.asset) : null;
+      const accountMode = result.accountMode === 'UNKNOWN' && ['DEMO', 'REAL'].includes(selectedAccount)
+        ? selectedAccount : result.accountMode;
+      const saved = marketDataStore.recordTradeResult({
+        ...result,
+        asset: resolved?.isOTC ? resolved.asset : null,
+        accountMode
+      });
+      if (saved.inserted) {
+        log('info', 'Получен и сохранён результат закрытой сделки Pocket Option', {
+          asset: saved.record.asset, timeframe: saved.record.timeframe, direction: saved.record.direction,
+          accountMode: saved.record.accountMode, result: saved.record.result, profit: saved.record.profit
+        });
+        scheduleMarketStatusPublish();
+      }
+    },
     onStatus: scheduleMarketStatusPublish
   });
   marketDataCapture.attach().catch(error => log('error', 'Ошибка запуска захвата рыночных данных', String(error)));
@@ -568,6 +586,16 @@ ipcMain.handle('app:analysis-decisions:list', (event, filters = {}) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище журнала недоступно');
   return marketDataStore.listAnalysisDecisions(filters);
+});
+ipcMain.handle('app:trade-results:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+  return marketDataStore.listTradeResults(filters);
+});
+ipcMain.handle('app:trade-statistics:get', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
+  return marketDataStore.getTradeStatistics(filters);
 });
 ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
