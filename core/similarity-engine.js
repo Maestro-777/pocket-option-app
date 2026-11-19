@@ -22,7 +22,7 @@ function validateOptions(options = {}) {
   if (value.minExamples < 1 || value.minExamples > value.topK) throw new RangeError('minExamples должен быть от 1 до topK');
   if (value.minDirectionVotes < 1 || value.minDirectionVotes > value.topK) throw new RangeError('minDirectionVotes должен быть от 1 до topK');
   if (value.lookback < 3 || value.lookback > 300) throw new RangeError('lookback должен быть от 3 до 300');
-  if (value.maxExamples < value.topK || value.maxExamples > 100_000) throw new RangeError('maxExamples должен быть от topK до 100000');
+  if (value.maxExamples < value.topK || value.maxExamples > 10_000) throw new RangeError('maxExamples должен быть от topK до 10000');
   if (!Number.isFinite(value.minSimilarity) || value.minSimilarity < 0 || value.minSimilarity > 100) {
     throw new RangeError('minSimilarity должен быть от 0 до 100');
   }
