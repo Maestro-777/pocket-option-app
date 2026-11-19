@@ -389,7 +389,7 @@ ipcMain.on('site:market-data', (event, payload) => {
 });
 ipcMain.handle('app:market-data:get-status', event => {
   if (!isTrustedControlSender(event)) return { connected: false, error: 'untrusted_sender' };
-  return marketDataService.getStatus();
+  return { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null };
 });
 ipcMain.handle('app:market-data:list-assets', (event, options = {}) => {
   if (!isTrustedControlSender(event)) return [];
