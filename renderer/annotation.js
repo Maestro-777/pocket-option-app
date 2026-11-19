@@ -194,6 +194,7 @@
   async function analyze() {
     const config = {
       topK: Number($('matcher-topk').value),
+      patternLength: Number($('matcher-pattern-length').value),
       similarityThreshold: Number($('matcher-threshold').value),
       minExamples: Number($('matcher-min-examples').value),
       minDirectionalMatches: Number($('matcher-min-votes').value)
