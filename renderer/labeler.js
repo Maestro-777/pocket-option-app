@@ -587,11 +587,15 @@ function renderTradeStatistics(statistics, recent) {
   const summary = statistics?.overall || { total: 0, wins: 0, losses: 0, draws: 0, winRate: null, netProfit: 0 };
   const summaryRoot = $('trade-stats-summary');
   summaryRoot.replaceChildren();
+  const latestBalances = new Map();
+  for (const point of (statistics?.balanceHistory || [])) latestBalances.set(point.accountMode, point.balance);
   const cards = [
     ['Закрытых сделок', String(summary.total)],
     ['Чистый P/L', formatProfit(summary.netProfit)],
     ['Win rate', summary.winRate == null ? 'н/д' : summary.winRate.toFixed(1) + '%'],
-    ['WIN / LOSS / DRAW', summary.wins + ' / ' + summary.losses + ' / ' + summary.draws]
+    ['WIN / LOSS / DRAW', summary.wins + ' / ' + summary.losses + ' / ' + summary.draws],
+    ['Баланс DEMO', latestBalances.has('DEMO') ? Number(latestBalances.get('DEMO')).toFixed(2) : 'н/д'],
+    ['Баланс REAL', latestBalances.has('REAL') ? Number(latestBalances.get('REAL')).toFixed(2) : 'н/д']
   ];
   for (const [label, value] of cards) {
     const card = document.createElement('div');
@@ -626,6 +630,20 @@ function renderTradeStatistics(statistics, recent) {
           (item.winRate == null ? 'н/д' : item.winRate.toFixed(1) + '%');
         line.append(name, value); block.append(line);
       }
+    }
+    breakdown.append(block);
+  }
+
+  const curve = (statistics?.profitCurve || []).slice(-10).reverse();
+  if (curve.length) {
+    const block = document.createElement('div'); block.className = 'trade-stat-group';
+    const heading = document.createElement('h3'); heading.textContent = 'Накопленный P/L по счёту';
+    block.append(heading);
+    for (const point of curve) {
+      const line = document.createElement('div'); line.className = 'trade-stat-line';
+      const name = document.createElement('span'); name.textContent = point.accountMode + ' · ' + fmtTime(point.closedAt);
+      const value = document.createElement('b'); value.textContent = formatProfit(point.cumulativeProfit);
+      line.append(name, value); block.append(line);
     }
     breakdown.append(block);
   }
