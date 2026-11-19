@@ -190,8 +190,18 @@ class MarketDataStore {
     const key = tick.ts + ':' + tick.price;
     if (state.seen.has(key)) return;
     state.seen.add(key);
-    state.ticks.push(tick);
-    state.ticks.sort((a, b) => a.ts - b.ts);
+    const last = state.ticks[state.ticks.length - 1];
+    if (!last || tick.ts >= last.ts) {
+      state.ticks.push(tick);
+    } else {
+      let low = 0, high = state.ticks.length;
+      while (low < high) {
+        const mid = (low + high) >> 1;
+        if (state.ticks[mid].ts <= tick.ts) low = mid + 1;
+        else high = mid;
+      }
+      state.ticks.splice(low, 0, tick);
+    }
     if (state.ticks.length > this.maxTicksPerAsset) {
       const removed = state.ticks.splice(0, state.ticks.length - this.maxTicksPerAsset);
       for (const item of removed) state.seen.delete(item.ts + ':' + item.price);
@@ -206,12 +216,22 @@ class MarketDataStore {
     if (!state.candles.has(key)) state.candles.set(key, new Map());
     const store = state.candles.get(key);
     store.set(candle.startAt, candle);
-    while (store.size > this.maxCandlesPerAssetPeriod) store.delete(store.keys().next().value);
+    while (store.size > this.maxCandlesPerAssetPeriod) {
+      const oldest = Math.min(...store.keys());
+      store.delete(oldest);
+    }
   }
   getTicks(asset, limit = 500) {
     const state = this.assets.get(normalizeAssetName(asset));
     if (!state) return [];
     return state.ticks.slice(-Math.max(1, Math.min(5000, Number(limit) || 500))).map(tick => ({ ...tick }));
+  }
+  getCandles(asset, periodSec, limit = 500) {
+    const state = this.assets.get(normalizeAssetName(asset));
+    const store = state?.candles.get(String(Math.floor(Number(periodSec))));
+    if (!store) return [];
+    return [...store.values()].sort((a, b) => a.startAt - b.startAt)
+      .slice(-Math.max(1, Math.min(2000, Number(limit) || 500))).map(candle => ({ ...candle }));
   }
   getSnapshot(now = Date.now()) {
     const assets = [...this.assets.entries()].map(([asset, state]) => ({
