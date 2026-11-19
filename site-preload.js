@@ -83,6 +83,7 @@ function installMarketWebSocketTap() {
   class MarketTapWebSocket extends NativeWebSocket {
     constructor(...args) {
       super(...args);
+      try { this.binaryType = 'arraybuffer'; } catch (_) {}
       this.addEventListener('message', event => {
         if (typeof event.data === 'string' || event.data instanceof ArrayBuffer) {
           parsePacket(event.data, this);
