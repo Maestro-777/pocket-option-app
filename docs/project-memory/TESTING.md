@@ -15,6 +15,7 @@
 - [x] main/preload/site-preload/site-bridge/renderer.
 - [x] pocket-tracker 3.6.0 inject.js и ARCHITECTURE.md: WebSocket, updateAssets/updateStream, history, DOM selectors и executeTrade flow.
 - [x] Новые core модули и тестовые сценарии проверены чтением исходников.
+- [x] ScanStateStore и восстановление dedup баров добавлены в unit tests.
 
 ## Не подтверждено runtime
 - [ ] Актуальный CI run для HEAD commit: `npm run check`, `npm test`, Windows x64 build.
