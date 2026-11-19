@@ -74,3 +74,9 @@
 - [x] Проверки market batch: allow-list event names, maximum item count, total/per-event payload size, timestamp clamping.
 - [x] Локальный прогон ipc-validation.test.js: 5 passed, 0 failed.
 - [ ] Electron integration test для фактического sender/webContents/frame binding.
+
+
+## Market Data → timeframe integration — 2026-11-20
+- [x] MarketDataStore.getAggregatedCandles delegates stored per-asset ticks to core/timeframes.js.
+- [x] Fixture verifies S5 OHLC aggregation, completed-candle filtering and asset isolation.
+- [x] Local combined run: 15 market-data + IPC validator tests passed; CI also runs the 5 timeframe tests.
