@@ -26,6 +26,7 @@ let recoveryInProgress = false;
 let healthTimer = null;
 let fullCheckTimer = null;
 let updateCheckTimer = null;
+let updateCheckTimeout = null;
 let appStartedAt = Date.now();
 let lastBalance = null;
 let lastSiteSignalAt = 0;
@@ -231,6 +232,7 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (Number.isFinite(Number(next.reconnectDelaySeconds))) settings.reconnectDelaySeconds = Math.max(5, Math.min(300, Number(next.reconnectDelaySeconds)));
   if (Number.isFinite(Number(next.maxReloadsPer10Minutes))) settings.maxReloadsPer10Minutes = Math.max(1, Math.min(5, Number(next.maxReloadsPer10Minutes)));
   saveSettings();
+  configureUpdateChecks();
   if (healthTimer) clearInterval(healthTimer);
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
@@ -351,6 +353,23 @@ autoUpdater.on('download-progress', p => { updateState = { status: 'downloading'
 autoUpdater.on('update-downloaded', info => { updateState = { status: 'downloaded', version: info.version, progress: 100, message: 'Версия ' + info.version + ' загружена. Нажмите «Установить и перезапустить» или закройте приложение для установки.' }; log('info', 'Обновление загружено', { version: info.version }); publishStatus(); });
 autoUpdater.on('error', error => { updateState = { status: 'error', version: updateState.version, progress: 0, message: 'Ошибка обновления: ' + String(error.message || error) }; log('error', 'Updater error', String(error)); publishStatus(); });
 
+function configureUpdateChecks() {
+  if (updateCheckTimer) clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
+  if (updateCheckTimeout) clearTimeout(updateCheckTimeout);
+  updateCheckTimer = null;
+  updateCheckTimeout = null;
+  if (!app.isPackaged || !settings.autoCheckUpdates) return;
+
+  // Даём окнам и IPC завершить запуск; затем проверяем обновления и повторяем раз в 6 часов.
+  updateCheckTimeout = setTimeout(() => {
+    updateCheckTimeout = null;
+    autoUpdater.checkForUpdates().catch(error => log('warn', 'Автопроверка обновлений недоступна', String(error)));
+  }, 12_000);
+  updateCheckTimer = setInterval(() => {
+    autoUpdater.checkForUpdates().catch(error => log('warn', 'Плановая проверка обновлений не удалась', String(error)));
+  }, 6 * 60 * 60_000);
+}
+
 async function checkNetwork() {
   lastNetworkCheckAt = Date.now();
   try {
@@ -435,11 +454,5 @@ else app.whenReady().then(async () => {
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
-  if (app.isPackaged && settings.autoCheckUpdates) {
-    // Даём окнам и IPC завершить запуск; затем проверяем обновления и повторяем раз в 6 часов.
-    setTimeout(() => autoUpdater.checkForUpdates().catch(error => log('warn', 'Автопроверка обновлений недоступна', String(error))), 12_000);
-    updateCheckTimer = setInterval(() => {
-      if (app.isPackaged) autoUpdater.checkForUpdates().catch(error => log('warn', 'Плановая проверка обновлений не удалась', String(error)));
-    }, 6 * 60 * 60_000);
-  }
+  configureUpdateChecks();
 }).catch(error => { console.error(error); app.quit(); });
