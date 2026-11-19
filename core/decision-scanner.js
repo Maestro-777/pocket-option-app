@@ -67,12 +67,14 @@ class DecisionScanner {
       this._examples.clear();
       this._lastScanned.clear();
       this._restoredKeys.clear();
+      this._latestSignals.clear();
       return;
     }
     const period = String(timeframe).toUpperCase();
     this._examples.delete(period);
     for (const key of [...this._lastScanned.keys()]) if (key.endsWith('|' + period)) this._lastScanned.delete(key);
     for (const key of [...this._restoredKeys]) if (key.endsWith('|' + period)) this._restoredKeys.delete(key);
+    for (const key of [...this._latestSignals.keys()]) if (key.endsWith('|' + period)) this._latestSignals.delete(key);
   }
 
   _schedule(delay) {
