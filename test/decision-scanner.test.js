@@ -60,6 +60,8 @@ test('scans a queued OTC asset and persists a decision snapshot', async () => {
   assert.equal(decisions[0].queryCandles.length, 3);
   assert.equal(decisions[0].algorithmVersion, 'shape-v1');
   assert.equal(scanner.getStatus().decisions, 1);
+  assert.ok(Array.isArray(scanner.getStatus().rankedSignals));
+  if (decisions[0].status === 'SIGNAL') assert.equal(scanner.getStatus().rankedSignals[0].asset, 'EURUSD_OTC');
   assert.equal(live.length, 3);
   scanner.close();
 });
