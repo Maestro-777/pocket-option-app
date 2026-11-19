@@ -8,7 +8,7 @@ const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
 const { MarketDataStore } = require('./core/market-data');
-const { isAllowedPocketOptionUrl, validateBalancePayload, validateMarketBatch } = require('./core/ipc-validation');
+const { isTrustedPocketOptionFrame, validateBalancePayload, validateMarketBatch } = require('./core/ipc-validation');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -292,9 +292,8 @@ async function waitForAccountMode(mode, timeoutMs, afterTs = 0) {
   return false;
 }
 function isTrustedPocketOptionSender(event) {
-  if (!siteWindow || event.sender !== siteWindow.webContents) return false;
-  const frameUrl = event.senderFrame?.url || siteWindow.webContents.getURL();
-  return isAllowedPocketOptionUrl(frameUrl);
+  if (!siteWindow || siteWindow.isDestroyed()) return false;
+  return isTrustedPocketOptionFrame(event, siteWindow.webContents, siteWindow.webContents.getURL());
 }
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
