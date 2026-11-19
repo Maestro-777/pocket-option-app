@@ -10,6 +10,7 @@ const ModuleManager = require('./modules/manager');
 const { MarketDataService, normalizeAsset } = require('./core/market-data');
 const { ExampleStore } = require('./core/example-store');
 const { DecisionJournal } = require('./core/decision-journal');
+const { MarketDataStore } = require('./core/market-data-store');
 const { analyzeSituation } = require('./core/matcher');
 
 const APP_NAME = 'Pocket Option Background';
@@ -43,6 +44,9 @@ let updateState = { status: 'idle', version: null, progress: 0, message: 'Про
 let moduleManager = null;
 const marketDataService = new MarketDataService();
 let marketDataPublishTimer = null;
+let marketDataSaveTimer = null;
+let shutdownInProgress = false;
+let allowQuit = false;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -58,6 +62,7 @@ const settingsFile = () => path.join(userRoot(), 'settings.json');
 const logFile = () => path.join(logsDir(), 'application.log');
 const exampleStore = new ExampleStore(path.join(userRoot(), 'data', 'examples.json'));
 const decisionJournal = new DecisionJournal(path.join(logsDir(), 'decisions.jsonl'));
+const marketDataStore = new MarketDataStore(marketDataService, path.join(userRoot(), 'data', 'market-data.json'));
 
 function log(level, message, data) {
   const row = { at: new Date().toISOString(), level, message: String(message), ...(data ? { data } : {}) };
@@ -261,6 +266,7 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  marketDataSaveTimer = setInterval(() => marketDataStore.save().catch(error => log('error', 'Периодическое сохранение рыночных данных не удалось', String(error))), 60_000);
   if (settings.showMiniWidget) createMiniWindow().show();
   else if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
   log('info', 'Настройки сохранены', settings); return settings;
@@ -544,10 +550,17 @@ async function runFullCheck(source) {
   return result;
 }
 
-app.on('before-quit', () => {
-  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
-  if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
-  log('info', 'Приложение завершает работу');
+app.on('before-quit', event => {
+  if (allowQuit) return;
+  event.preventDefault();
+  if (shutdownInProgress) return;
+  shutdownInProgress = true; quitting = true;
+  clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
+  clearInterval(marketDataSaveTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
+  log('info', 'Приложение завершает работу; сохраняем рыночные данные');
+  const tasks = [marketDataStore.save().catch(error => log('error', 'Не удалось сохранить рыночные данные', String(error)))];
+  if (moduleManager) tasks.push(moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error))));
+  Promise.allSettled(tasks).then(() => { allowQuit = true; app.quit(); });
 });
 app.on('window-all-closed', () => { /* системный трей удерживает приложение открытым */ });
 app.on('activate', showMain);
@@ -556,7 +569,10 @@ const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
-  loadSettings(); createMainWindow(); createTray();
+  loadSettings();
+  try { const restored = await marketDataStore.load(); if (restored) log('info', 'Рыночные данные восстановлены из локального снимка', { ticks: restored.tickCount, historyCandles: restored.historyCandleCount }); }
+  catch (error) { log('error', 'Снимок рыночных данных повреждён или несовместим; запускаем пустой буфер', String(error)); }
+  createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
   if (settings.showMiniWidget) createMiniWindow().show();
