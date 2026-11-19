@@ -6,7 +6,7 @@ const NativeWebSocket=window.WebSocket;
 if(typeof NativeWebSocket!=='function')return;
 const ALLOWED=new Set(['updateAssets','updateStream','quotes/stream','updateHistoryNewFast','updateHistoryNew','loadHistoryPeriod','loadHistoryPeriodFast','history/list/v2','successcloseOrder','s_orders/close']);
 const MAX_ROWS=5000,MAX_HISTORY=10000;
-let sequence=0,activeSocket=null;
+let sequence=0,activeSocket=null;const cancelledTradeCommands=new Set();
 function publish(name,payload,ws){
  if(!ALLOWED.has(name))return;
  if(ws&&ws.readyState===1)activeSocket=ws;
@@ -110,8 +110,8 @@ function readCurrentAsset(){
  return'UNKNOWN';
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function waitForAsset(expected,timeout=6000){
- const start=Date.now();while(Date.now()-start<timeout){if(readCurrentAsset()===expected)return true;await sleep(100);}return false;
+async function waitForAsset(expected,timeout=6000,isCancelled=()=>false){
+ const start=Date.now();while(Date.now()-start<timeout){if(isCancelled())return false;if(readCurrentAsset()===expected)return true;await sleep(100);}return false;
 }
 function findBetInput(){
  const selectors=['.value__val input[type="text"]','.value__val input','.control__value input[type="text"]','.control__value input','.block__control.control input[type="text"]','.block__control input','input[inputmode="decimal"]','.bet-input','input[class*="bet"]','input[class*="amount"]'];
@@ -182,9 +182,12 @@ function findTradeButton(direction){
  for(const selector of selectors){const button=document.querySelector(selector);if(button&&button.offsetParent!==null&&!button.classList.contains('disabled')&&button.getAttribute('aria-disabled')!=='true')return button;}
  return null;
 }
+window.__PT_CANCEL_TRADE_COMMAND__=tradeId=>{const id=String(tradeId||'');if(!id)return false;cancelledTradeCommands.add(id);return true;};
 window.__PT_TRADE_COMMAND__=async request=>{
+ const tradeId=String(request&&request.tradeId||'');
  try{
-  if(!request||request.version!==1||!['UP','DOWN'].includes(request.direction))return{ok:false,reason:'invalid_request'};
+  if(!request||request.version!==1||!tradeId||!['UP','DOWN'].includes(request.direction))return{ok:false,reason:'invalid_request'};
+  const isCancelled=()=>cancelledTradeCommands.has(tradeId);if(isCancelled())return{ok:false,reason:'cancelled_by_pause'};
   const asset=normalizeAssetName(request.asset),rawAsset=String(request.rawAsset||'');
   const amount=Number(request.amount),expiry=Number(request.expirySeconds);
   if(!asset||!rawAsset||!Number.isFinite(amount)||amount<=0||amount>100000||!Number.isInteger(expiry)||expiry<1||expiry>86400)return{ok:false,reason:'invalid_trade_parameters'};
@@ -192,17 +195,20 @@ window.__PT_TRADE_COMMAND__=async request=>{
   let actualAsset=readCurrentAsset();
   if(actualAsset!==asset){
    activeSocket.send('42["changeSymbol",'+JSON.stringify({asset:rawAsset,period:60})+']');
-   if(!await waitForAsset(asset,Number(request.switchTimeoutMs)||6000))return{ok:false,reason:'asset_switch_not_confirmed',actualAsset:readCurrentAsset()};
+   if(!await waitForAsset(asset,Number(request.switchTimeoutMs)||6000,isCancelled))return{ok:false,reason:isCancelled()?'cancelled_by_pause':'asset_switch_not_confirmed',actualAsset:readCurrentAsset()};
    actualAsset=readCurrentAsset();
   }
+  if(isCancelled())return{ok:false,reason:'cancelled_by_pause'};
   if(actualAsset!==asset)return{ok:false,reason:'asset_mismatch_before_order',actualAsset};
   if(!setAmount(amount))return{ok:false,reason:'amount_not_applied'};
   if(!await setExpiration(expiry))return{ok:false,reason:'expiration_not_applied',actualExpiration:readExpiration()};
+  if(isCancelled())return{ok:false,reason:'cancelled_by_pause'};
   actualAsset=readCurrentAsset();if(actualAsset!==asset)return{ok:false,reason:'asset_changed_before_click',actualAsset};
   const button=findTradeButton(request.direction);if(!button)return{ok:false,reason:'trade_button_unavailable'};
+  if(isCancelled())return{ok:false,reason:'cancelled_by_pause'};
   button.click();
   const result={ok:true,submitted:true,confirmed:false,asset,direction:request.direction,amount,expirySeconds:expiry,submittedAt:Date.now(),confirmation:'awaiting_platform_result'};
   window.__PT_LAST_TRADE_SUBMISSION__=result;return result;
- }catch(error){return{ok:false,reason:'trade_command_error',message:String(error&&error.message||error)};}
+ }catch(error){return{ok:false,reason:'trade_command_error',message:String(error&&error.message||error)};}finally{if(tradeId)cancelledTradeCommands.delete(tradeId);}
 };
 })();
