@@ -48,6 +48,7 @@ let marketStatusPublishTimer = null;
 let marketPersistenceTimer = null;
 let marketPersistenceError = null;
 let persistedCatalogRevision = -1;
+let marketLastPruneAt = 0;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -162,7 +163,7 @@ function attachMarketDataCapture(win) {
   if (marketDataStore) {
     try {
       const restoredCatalog = assetCatalog.restore(marketDataStore.listCatalog({ otcOnly: true }));
-      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(1000));
+      const restored = marketDataHub.restoreCandles(marketDataStore.getRecentCandles(300));
       persistedCatalogRevision = assetCatalog.revision;
       log('info', 'Исторические рыночные данные восстановлены', { restoredCatalog, ...restored });
     } catch (error) {
@@ -192,6 +193,11 @@ function persistMarketDataSafely() {
     if (catalog && catalog.revision !== persistedCatalogRevision) {
       marketDataStore.upsertCatalog(catalog.listAll());
       persistedCatalogRevision = catalog.revision;
+    }
+    const now = Date.now();
+    if (now - marketLastPruneAt >= 60_000) {
+      marketDataStore.pruneCandles(300);
+      marketLastPruneAt = now;
     }
     if (marketPersistenceError) {
       marketPersistenceError = null;
@@ -549,6 +555,8 @@ else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
   try {
     marketDataStore = new MarketDataStore(path.join(userRoot(), 'market-data.sqlite'));
+    marketDataStore.pruneCandles(300);
+    marketLastPruneAt = Date.now();
     log('info', 'SQLite хранилище рыночных данных открыто', marketDataStore.getStats());
   } catch (error) {
     marketPersistenceError = String(error?.message || error);
