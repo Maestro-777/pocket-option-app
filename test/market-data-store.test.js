@@ -151,6 +151,7 @@ test('rejects future leakage into input features and post-entry candles outside 
   assert.throws(() => store.createManualExample(manualExample({
     postCandles: [candle({ startAt: 15000, endAt: 20000 }), candle({ startAt: 20000, endAt: 25000 })]
   })), /Поствходящие свечи/);
+  assert.throws(() => store.createManualExample(manualExample({ segmentStart: 5001 })), /границы участка/);
   assert.equal(store.getStats().manualExamples, 0);
   store.close();
 });
@@ -158,6 +159,7 @@ test('rejects future leakage into input features and post-entry candles outside 
 test('edits and deletes a manual example without changing its identity or creation time', () => {
   const store = new MarketDataStore(':memory:');
   const created = store.createManualExample(manualExample(), 30000);
+  assert.throws(() => store.updateManualExample(created.id, ['bad'], 35000), /должны быть объектом/);
   const updated = store.updateManualExample(created.id, { notes: 'reviewed', direction: 'DOWN' }, 40000);
   assert.equal(updated.id, created.id);
   assert.equal(updated.createdAt, created.createdAt);
