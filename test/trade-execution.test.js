@@ -31,3 +31,5 @@ test('pause cancels an in-flight page command and waits for it to settle',async(
  }});
  const pending=adapter.execute(signal('EURUSD_OTC','pause-test'));await started;gate.setPaused(true);await adapter.cancelInFlight();const result=await pending;assert.equal(result.ok,false);assert.equal(result.reason,'cancelled_by_pause');assert.equal(gate.getState().openTrades,0);assert.equal(gate.getState().pendingReservations,0);
 });
+
+test('does not close or classify a trade when broker close event omits profit',async()=>{const{adapter,gate}=setup();await adapter.execute(signal());const result=await adapter.handleCloseEvent({deals:[{asset:'EURUSD_otc',amount:1,id:'close-no-profit'}]});assert.equal(result[0].matched,false);assert.equal(result[0].reason,'missing_or_invalid_profit');assert.equal(gate.getState().openTrades,1);});
