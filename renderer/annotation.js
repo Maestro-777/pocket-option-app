@@ -380,6 +380,7 @@
     }
     if (request) { const result = await api.resolveTrade(request); $('trading-state').textContent = result && result.ok ? 'Запись сделки сверена.' : (result?.reason || 'Не удалось сверить сделку'); await loadTradingState(); }
   });
+  $('annotation-open-window').addEventListener('click', async () => { const result = await api.openAnnotationWindow(); if (!result || !result.ok) $('analysis-monitor-status').textContent = result?.reason || 'Не удалось открыть отдельное окно'; });
   $('analysis-save').addEventListener('click', () => saveAnalysisConfig().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('analysis-scan-now').addEventListener('click', () => scanNow().catch(e => { $('analysis-monitor-status').textContent = String(e.message || e); }));
   $('annotation-load').addEventListener('click', () => loadCandles().catch(e => say(String(e.message || e))));
@@ -422,4 +423,5 @@
   loadAssets().catch(() => {});
   loadRecentDecisions().catch(() => {});
   loadTradingState().catch(() => {});
+  if ($('page-annotation').classList.contains('active')) { loadAssets().catch(() => {}); loadAnalysisConfig().catch(() => {}); }
 })();
