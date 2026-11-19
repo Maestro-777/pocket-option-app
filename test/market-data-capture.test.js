@@ -148,3 +148,17 @@ test('captures historical OHLC events for confirmed OTC assets', async () => {
   assert.equal(capture.getStatus().catalog.otc, 1);
   capture.close();
 });
+
+test('counts broker trade results intentionally filtered by the application', async () => {
+  const debuggerApi = new FakeDebugger();
+  const capture = new MarketDataCapture({
+    debuggerApi, marketDataHub: new MarketDataHub({ timeframes: ['S5'] }),
+    onTradeResult: () => false
+  });
+  await capture.attach();
+  debuggerApi.created('trade-socket');
+  debuggerApi.frame('trade-socket', '42["successcloseOrder",{"deals":[{"id":88,"amount":2,"profit":1.7}]}]');
+  assert.equal(capture.getStatus().receivedTradeResults, 0);
+  assert.equal(capture.getStatus().rejectedTradeResults, 1);
+  capture.close();
+});
