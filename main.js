@@ -260,6 +260,7 @@ function attachMarketDataCapture(win) {
     onTradeResult: result => {
       if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
       const resolved = result.asset ? assetCatalog.resolve(result.asset) : null;
+      if (resolved && !resolved.isOTC && !resolved.ambiguous) return false;
       const balanceFresh = lastBalance && Date.now() - Number(lastBalance.ts) <= 60_000;
       const balanceAccount = balanceFresh ? String(lastBalance.accountType || '').toUpperCase() : 'UNKNOWN';
       const accountMode = result.accountMode === 'UNKNOWN' && ['DEMO', 'REAL'].includes(balanceAccount)
@@ -276,6 +277,7 @@ function attachMarketDataCapture(win) {
         });
         scheduleMarketStatusPublish();
       }
+      return true;
     },
     onStatus: scheduleMarketStatusPublish
   });
