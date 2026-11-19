@@ -33,3 +33,5 @@ test('pause cancels an in-flight page command and waits for it to settle',async(
 });
 
 test('does not close or classify a trade when broker close event omits profit',async()=>{const{adapter,gate}=setup();await adapter.execute(signal());const result=await adapter.handleCloseEvent({deals:[{asset:'EURUSD_otc',amount:1,id:'close-no-profit'}]});assert.equal(result[0].matched,false);assert.equal(result[0].reason,'missing_or_invalid_profit');assert.equal(gate.getState().openTrades,1);});
+
+test('treats zero broker profit as a lost stake, matching Pocket Option extension semantics',async()=>{const{adapter,gate}=setup();await adapter.execute(signal());const result=await adapter.handleCloseEvent({deals:[{asset:'EURUSD_otc',amount:1,profit:0,id:'zero-profit'}]});assert.equal(result[0].outcome,'LOSS');assert.equal(result[0].profit,-1);assert.equal(gate.getState().openTrades,0);});
