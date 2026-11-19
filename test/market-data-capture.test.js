@@ -101,3 +101,19 @@ test('uses updateAssets catalog to admit only confirmed OTC assets', async () =>
   assert.equal(capture.getStatus().catalog.otc, 2);
   capture.close();
 });
+
+test('captures historical OHLC events for confirmed OTC assets', async () => {
+  const debuggerApi = new FakeDebugger();
+  const hub = new MarketDataHub({ timeframes: ['S5'] });
+  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: hub });
+  await capture.attach();
+  debuggerApi.created('history-socket');
+  debuggerApi.frame('history-socket', '42["updateHistoryNewFast",{"asset":"EURUSD_otc","period":5,"history":[[1700000000,1.1,1.3,1.0,1.2],[1700000005,1.2,1.4,1.1,1.3]]}]');
+  const candles = hub.getCandles('EURUSD_OTC', 'S5');
+  assert.equal(candles.length, 2);
+  assert.equal(candles[0].high, 1.3);
+  assert.equal(candles[1].close, 1.3);
+  assert.equal(hub.getDirtyCompletedCandles(Date.now()).length, 2);
+  assert.equal(capture.getStatus().catalog.otc, 1);
+  capture.close();
+});
