@@ -189,13 +189,13 @@ test('filters manual examples by asset and timeframe and never mixes them with m
   store.close();
 });
 
-test('migrates schema version 1 to version 4 without losing market candles', () => {
+test('migrates schema version 1 to version 5 without losing market candles', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'po-market-migration-'));
   const file = path.join(directory, 'migration.sqlite');
   try {
     const first = new MarketDataStore(file);
     first.upsertCandles([candle()]);
-    first.db.exec('DROP TABLE analysis_decisions; DROP TABLE manual_examples; PRAGMA user_version = 1');
+    first.db.exec('DROP TABLE trade_results; DROP TABLE analysis_decisions; DROP TABLE manual_examples; PRAGMA user_version = 1');
     first.close();
     const upgraded = new MarketDataStore(file);
     assert.equal(upgraded.getStats().schemaVersion, 5);
