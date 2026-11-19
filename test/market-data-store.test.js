@@ -222,6 +222,7 @@ test('stores immutable decision snapshots and filters the analysis journal', () 
   assert.deepEqual(saved.paramsSnapshot, decision.paramsSnapshot);
   assert.deepEqual(saved.matches, decision.matches);
   assert.deepEqual(saved.votes, decision.votes);
+  assert.deepEqual(saved.historical, { wins: 0, losses: 0, draws: 0, unknown: 0, winRate: null });
   assert.deepEqual(saved.historical, decision.historical);
   assert.equal(saved.queryCandles.length, 1);
   assert.equal(store.getStats().analysisDecisions, 1);
@@ -229,6 +230,7 @@ test('stores immutable decision snapshots and filters the analysis journal', () 
   assert.equal(store.listAnalysisDecisions({ status: 'NO_SIGNAL' }).length, 0);
   assert.throws(() => store.createAnalysisDecision({ ...decision, id: 'bad-1', status: 'NO_SIGNAL', direction: 'UP' }, 32000), /Направление не соответствует/);
   assert.throws(() => store.createAnalysisDecision({ ...decision, id: 'bad-2', decisionAt: 33000 }, 32000), /время решения/);
+  assert.throws(() => store.createAnalysisDecision({ ...decision, id: 'bad-3', historical: { wins: -1 } }, 32000), /историческую результативность/);
   store.close();
 });
 
