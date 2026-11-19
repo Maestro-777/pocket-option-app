@@ -70,3 +70,17 @@ test('handles Network.enable failure and releases its own debugger', async () =>
   assert.equal(capture.getStatus().status, 'error');
   assert.equal(debuggerApi.isAttached(), false);
 });
+
+test('does not report listening when the target closes during Network.enable', async () => {
+  const debuggerApi = new FakeDebugger();
+  let release;
+  debuggerApi.sendCommand = () => new Promise(resolve => { release = resolve; });
+  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: new MarketDataHub() });
+  const attaching = capture.attach();
+  await Promise.resolve();
+  capture.close();
+  release({});
+  assert.equal(await attaching, false);
+  assert.equal(capture.getStatus().status, 'stopped');
+  assert.equal(capture.getStatus().attached, false);
+});
