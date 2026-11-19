@@ -25,6 +25,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('app:market:assets', () => []);
     ipcMain.handle('app:settings:get', () => ({}));
     ipcMain.handle('app:analysis-decisions:list', () => []);
+    ipcMain.handle('app:status:get', () => ({ marketData: { scanner: { running: false, pendingAssets: 0, selectedTimeframes: [], decisions: 0, errors: 0, rankedSignals: [] } } }));
     ipcMain.handle('app:manual-examples:list', () => []);
     window = new BrowserWindow({
       show: false,
