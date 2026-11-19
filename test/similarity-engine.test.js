@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { analyzeSimilarity, extractFeatures, validateOptions, evaluateWalkForward } = require('../core/similarity-engine');
+const { analyzeSimilarity, extractFeatures, validateOptions, evaluateWalkForward, prepareExamples } = require('../core/similarity-engine');
 
 const TIMEFRAME = 'S5';
 const DURATION = 5000;
@@ -109,6 +109,24 @@ test('refuses unfinished or future candles in the live query', () => {
     examples: [example('sample', 'UP')],
     options: { topK: 1, minExamples: 1, minDirectionVotes: 1 }
   }), /Будущая или незакрытая/);
+});
+
+test('refuses discontinuous live windows and skips discontinuous historical samples', () => {
+  const live = makeCandles('EURUSD_OTC', 1, 5000);
+  live[10] = { ...live[10], startAt: live[10].startAt + DURATION, endAt: live[10].endAt + DURATION };
+  const result = analyzeSimilarity({
+    timeframe: TIMEFRAME, entryAt: 200000, candles: live,
+    examples: [example('valid', 'UP')],
+    options: { topK: 1, minExamples: 1, minDirectionVotes: 1, lookback: 30 }
+  });
+  assert.equal(result.status, 'NO_SIGNAL');
+  assert.equal(result.reason, 'gaps_in_live_history');
+
+  const broken = example('broken', 'UP');
+  broken.inputCandles[10] = { ...broken.inputCandles[10], startAt: broken.inputCandles[10].startAt + DURATION, endAt: broken.inputCandles[10].endAt + DURATION };
+  const prepared = prepareExamples([broken], TIMEFRAME, { topK: 1, minExamples: 1, minDirectionVotes: 1 });
+  assert.equal(prepared.items.length, 0);
+  assert.equal(prepared.skipped, 1);
 });
 
 test('walk-forward evaluation uses only strictly earlier examples and reports coverage', () => {
