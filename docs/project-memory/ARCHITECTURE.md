@@ -20,6 +20,8 @@
 - core/asset-catalog.js: чтение updateAssets, нормализация символов, определение OTC по явному маркеру символа/названия и отказ от неоднозначных alias.
 - core/market-data-capture.js: изолированный CDP Network capture через Electron webContents.debugger, отдельный декодер на каждый WebSocket.
 - core/market-data-store.js: SQLite-хранилище свечей, каталога и независимых ручных примеров через встроенный `node:sqlite`; транзакционные upsert, CRUD, контроль целостности и восстановление.
+- renderer/labeler.html, labeler.js, labeler.css: отдельное окно ручной разметки; Canvas-график, выбор OTC-пары/таймфрейма, отметки участка и intrabar-точки входа, список примеров с редактированием/удалением.
+- preload.js / main.js: узкие IPC-методы для чтения OTC-свечей и CRUD примеров; доступ разрешён только локальным renderer-окнам приложения.
 - main.js подключает CDP capture к окну Pocket Option и публикует статус/диагностику рыночного потока.
 - Код modules/* выполняется в main process с его полномочиями, это не sandbox.
 
