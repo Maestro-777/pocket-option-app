@@ -17,7 +17,14 @@ function publish(name,payload,ws){
   if(safe.length>=MAX_ROWS)break;
   if(name==='successcloseOrder'||name==='s_orders/close'){
    const deals=Array.isArray(row)?row:Array.isArray(row&&row.deals)?row.deals:null;
-   const cleanDeal=item=>item&&typeof item==='object'?{id:item.id,ticket:item.ticket,asset:item.asset,symbol:item.symbol,pair:item.pair,direction:item.direction,amount:item.amount,investment:item.investment,profit:item.profit,netProfit:item.netProfit,percentProfit:item.percentProfit,timestamp:item.timestamp,time:item.time,status:item.status,result:item.result}:null;
+   const cleanDeal=item=>{
+    if(!item||typeof item!=='object')return null;const out={},str=(v,n)=>v==null?undefined:String(v).slice(0,n),num=v=>Number.isFinite(Number(v))?Number(v):undefined;
+    for(const key of ['id','ticket']){const v=str(item[key],128);if(v!==undefined)out[key]=v;}
+    for(const key of ['asset','symbol','pair']){const v=str(item[key],64);if(v!==undefined)out[key]=v;}
+    for(const key of ['direction','status','result']){const v=str(item[key],24);if(v!==undefined)out[key]=v;}
+    for(const key of ['amount','investment','profit','netProfit','percentProfit','timestamp','time']){const v=num(item[key]);if(v!==undefined)out[key]=v;}
+    return out;
+   };
    if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length)safe.push({deals:clean});}
    else{const clean=cleanDeal(row);if(clean)safe.push(clean);}
   }else if(name.startsWith('updateHistory')||name.startsWith('loadHistory')||name==='history/list/v2'){
@@ -25,7 +32,7 @@ function publish(name,payload,ws){
    if(data&&typeof data==='object'){
     const asset=data.asset||data.symbol,history=Array.isArray(data.history)?data.history:Array.isArray(data.data)?data.data:null;
     if(typeof asset==='string'&&history&&history.length<=MAX_HISTORY){
-     const clean=history.map(item=>Array.isArray(item)?item.slice(0,5):item&&typeof item==='object'?{time:item.time,t:item.t,ts:item.ts,timestamp:item.timestamp,open:item.open,o:item.o,high:item.high,h:item.h,low:item.low,l:item.l,close:item.close,c:item.c,price:item.price,p:item.p}:null).filter(Boolean);
+     const clean=history.map(item=>Array.isArray(item)?item.slice(0,5).map(v=>typeof v==='string'?v.slice(0,32):v):item&&typeof item==='object'?{time:item.time,t:item.t,ts:item.ts,timestamp:item.timestamp,open:item.open,o:item.o,high:item.high,h:item.h,low:item.low,l:item.l,close:item.close,c:item.c,price:item.price,p:item.p}:null).filter(Boolean);
      safe.push({asset,period:data.period,history:clean});
     }
    }
