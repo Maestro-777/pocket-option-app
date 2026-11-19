@@ -594,6 +594,9 @@ function renderTradeStatistics(statistics, recent) {
     ['Чистый P/L', formatProfit(summary.netProfit)],
     ['Win rate', summary.winRate == null ? 'н/д' : summary.winRate.toFixed(1) + '%'],
     ['WIN / LOSS / DRAW', summary.wins + ' / ' + summary.losses + ' / ' + summary.draws],
+    ['Валовая прибыль', formatProfit(summary.grossProfit)],
+    ['Валовый убыток', formatProfit(summary.grossLoss)],
+    ['Общий объём ставок', Number(summary.totalStake || 0).toFixed(2)],
     ['Баланс DEMO', latestBalances.has('DEMO') ? Number(latestBalances.get('DEMO')).toFixed(2) : 'н/д'],
     ['Баланс REAL', latestBalances.has('REAL') ? Number(latestBalances.get('REAL')).toFixed(2) : 'н/д']
   ];
