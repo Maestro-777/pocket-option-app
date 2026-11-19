@@ -509,10 +509,23 @@ function renderLiveSignals(status) {
   list.replaceChildren();
   const items = Array.isArray(scanner?.rankedSignals) ? scanner.rankedSignals : [];
   $('live-signal-count').textContent = String(items.length);
-  $('live-scanner-status').textContent = !scanner?.running
-    ? 'Фоновый анализ не запущен. Откройте Pocket Option и дождитесь подключения WebSocket.'
-    : 'Сканер активен · очередь ' + scanner.pendingAssets + ' · таймфреймы: ' + (scanner.selectedTimeframes || []).join(', ') +
+  const capture = status?.marketData?.capture;
+  const lastTickAge = capture?.lastTickReceivedAt ? Math.max(0, Date.now() - capture.lastTickReceivedAt) : null;
+  let scannerMessage;
+  if (!scanner?.running) {
+    scannerMessage = 'Фоновый анализ не запущен. Откройте Pocket Option, чтобы подключить рыночный поток.';
+  } else if (capture?.status !== 'listening') {
+    scannerMessage = 'Сканер готов, но WebSocket не слушается: ' + (capture?.lastError || capture?.status || 'ожидание подключения');
+  } else if (lastTickAge == null) {
+    scannerMessage = 'WebSocket подключён; ожидаем первые подтверждённые OTC-тики.';
+  } else if (lastTickAge > 30_000) {
+    scannerMessage = 'WebSocket подключён, но OTC-тики не поступали ' + Math.floor(lastTickAge / 1000) + ' сек.';
+  } else {
+    scannerMessage = 'Поток активен · OTC-активов ' + (capture?.catalog?.otc ?? '—') +
+      ' · очередь ' + scanner.pendingAssets + ' · таймфреймы: ' + (scanner.selectedTimeframes || []).join(', ') +
       ' · решений: ' + scanner.decisions + ' · ошибок: ' + scanner.errors;
+  }
+  $('live-scanner-status').textContent = scannerMessage;
   if (!items.length) {
     const empty = document.createElement('p');
     empty.className = 'empty';
