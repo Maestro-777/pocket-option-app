@@ -385,7 +385,9 @@ function renderAnalysis(result) {
     directionLabel,
     'Совпадений ≥ порога: ' + result.qualifiedMatches.length,
     'Голоса: ВВЕРХ ' + result.votes.UP + ' / ВНИЗ ' + result.votes.DOWN,
-    'Среднее сходство: ' + (result.averageSimilarity == null ? '—' : result.averageSimilarity.toFixed(2) + '%')
+    'Среднее сходство: ' + (result.averageSimilarity == null ? '—' : result.averageSimilarity.toFixed(2) + '%'),
+    'Параметры: Top-' + result.options.topK + ', порог ' + result.options.minSimilarity + '%, минимум примеров ' + result.options.minExamples +
+      ', голосов ' + result.options.minDirectionVotes + ', lookback ' + result.options.lookback
   ];
   if (result.historical) {
     parts.push('Историческая результативность: ' + (result.historical.winRate == null ? 'недостаточно данных' : result.historical.winRate.toFixed(2) + '%') +
@@ -454,7 +456,9 @@ async function runSimilarityBacktest() {
       ' · Точность среди сигналов: ' + accuracy +
       ' · Покрытие: ' + report.coverage.toFixed(2) + '%' +
       ' · Пропущено без истории: ' + report.skippedInsufficientHistory +
-      ' · Без бинарного исхода: ' + report.skippedUnknownOutcome;
+      ' · Без бинарного исхода: ' + report.skippedUnknownOutcome +
+      ' · Параметры: Top-' + report.options.topK + ', порог ' + report.options.minSimilarity + '%, минимум примеров ' +
+      report.options.minExamples + ', голосов ' + report.options.minDirectionVotes + ', lookback ' + report.options.lookback;
     setStatus('Хронологическая проверка завершена');
   } catch (error) {
     $('backtest-summary').textContent = error.message;
