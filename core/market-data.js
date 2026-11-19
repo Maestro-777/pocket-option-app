@@ -34,6 +34,7 @@ class MarketDataHub {
     }
 
     let assetSeries = this._assets.get(tick.asset);
+    const isNewAsset = !assetSeries;
     if (!assetSeries) {
       if (this._assets.size >= this.maxAssets) {
         this.stats.rejectedAssets++;
@@ -43,7 +44,6 @@ class MarketDataHub {
       for (const timeframe of this.timeframes) {
         assetSeries.set(timeframe, new CandleSeries({ asset: tick.asset, timeframe, maxCandles: this.maxCandlesPerSeries }));
       }
-      this._assets.set(tick.asset, assetSeries);
     }
 
     // Timeframes are independent series: an old tick may be outside the
@@ -82,6 +82,7 @@ class MarketDataHub {
       this.stats.rejectedTicks++;
       return { accepted: false, reason: 'series-error', error: error.message };
     }
+    if (isNewAsset) this._assets.set(tick.asset, assetSeries);
     if (rejectedTimeframes.length) {
       this.stats.partialTicks++;
       this.stats.rejectedTimeframes += rejectedTimeframes.length;
