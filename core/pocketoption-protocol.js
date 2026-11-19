@@ -169,7 +169,7 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
     const assetRaw = deal.asset ?? deal.symbol ?? deal.active ?? deal.pair ?? null;
     const timeframeRaw = normalizeTimeframe(deal.timeframe ?? deal.period ?? deal.interval);
     const directionRaw = String(deal.direction ?? deal.action ?? deal.type ?? '').toUpperCase();
-    const accountRaw = String(deal.accountMode ?? deal.account_type ?? payload?.accountMode ?? '').toUpperCase();
+    const accountRaw = String(deal.accountMode ?? deal.accountType ?? deal.account_type ?? payload?.accountMode ?? payload?.accountType ?? payload?.account_type ?? '').toUpperCase();
     const normalized = {
       brokerTradeId: brokerTradeId == null ? null : String(brokerTradeId),
       asset: typeof assetRaw === 'string' ? assetRaw : null,
