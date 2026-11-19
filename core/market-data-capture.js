@@ -26,6 +26,7 @@ class MarketDataCapture {
     this.rejectedUnknownAssets = 0;
     this.rejectedNonOtcAssets = 0;
     this.rejectedAmbiguousAssets = 0;
+    this.rejectedHistoryRows = 0;
     this._ownsDebugger = false;
     this._closing = false;
     this._protocols = new Map();
@@ -148,6 +149,7 @@ class MarketDataCapture {
       rejectedUnknownAssets: this.rejectedUnknownAssets,
       rejectedNonOtcAssets: this.rejectedNonOtcAssets,
       rejectedAmbiguousAssets: this.rejectedAmbiguousAssets,
+      rejectedHistoryRows: this.rejectedHistoryRows,
       catalog: { total: this.assetCatalog.size, otc: this.assetCatalog.listOTC().length, revision: this.assetCatalog.revision, ...this.assetCatalog.stats },
       protocol
     };
