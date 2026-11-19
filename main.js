@@ -720,6 +720,7 @@ else app.whenReady().then(async () => {
     },
     onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
   });
+  try { const persistedDecisions = await decisionJournal.readRecent(100000); const restored = signalScheduler.restoreProcessedDecisions(persistedDecisions); log('info', 'Восстановлена дедупликация обработанных баров', restored); } catch (error) { log('error', 'Не удалось восстановить дедупликацию решений', String(error)); }
   try { signalScheduler.start(); }
   catch (error) { log('error', 'Сохранённые параметры анализа некорректны; применяем безопасные настройки по умолчанию', String(error)); settings.analysisConfig = {}; signalScheduler.start(); }
   if (settings.showMiniWidget) createMiniWindow().show();
