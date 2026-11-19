@@ -7,6 +7,7 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataStore, SUPPORTED_EVENTS } = require('./core/market-data');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -37,6 +38,10 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+const marketDataStore = new MarketDataStore();
+let marketBatchWindowAt = 0;
+let marketBatchCount = 0;
+let marketStatusPublishedAt = 0;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -191,6 +196,7 @@ function getPublicStatus() {
       url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : null
     },
     network: { online: lastNetworkOk, checkedAt: lastNetworkCheckAt },
+    marketData: marketDataStore.getSnapshot(),
     account: {
       type: lastBalance?.accountType || selectedAccount.toLowerCase(),
       balance: lastBalance?.balance ?? null, currency: lastBalance?.currency || '',
@@ -281,8 +287,11 @@ async function waitForAccountMode(mode, timeoutMs) {
 }
 function isTrustedPocketOptionSender(event) {
   if (!siteWindow || event.sender !== siteWindow.webContents) return false;
-  try { const host = new URL(siteWindow.webContents.getURL()).hostname; return host === 'pocketoption.com' || host.endsWith('.pocketoption.com'); }
-  catch (_) { return false; }
+  try {
+    const frameUrl = event.senderFrame?.url || siteWindow.webContents.getURL();
+    const host = new URL(frameUrl).hostname;
+    return host === 'pocketoption.com' || host.endsWith('.pocketoption.com');
+  } catch (_) { return false; }
 }
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
@@ -292,6 +301,43 @@ ipcMain.on('site:balance', (event, payload) => {
   lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
+ipcMain.on('site:market-batch', (event, batch) => {
+  if (!isTrustedPocketOptionSender(event) || !Array.isArray(batch) || batch.length > 8) return;
+  const now = Date.now();
+  if (now - marketBatchWindowAt >= 1000) {
+    marketBatchWindowAt = now;
+    marketBatchCount = 0;
+  }
+  if (++marketBatchCount > 60) return;
+  let encoded;
+  try { encoded = JSON.stringify(batch); } catch (_) { return; }
+  if (!encoded || encoded.length > 512 * 1024) return;
+
+  let accepted = 0;
+  for (const item of batch) {
+    if (!item || !SUPPORTED_EVENTS.has(item.eventName) || item.payload == null) continue;
+    let size;
+    try { size = JSON.stringify(item.payload).length; } catch (_) { continue; }
+    if (!Number.isFinite(size) || size > 256 * 1024) continue;
+    const receivedAt = Number(item.receivedAt);
+    const safeReceivedAt = Number.isFinite(receivedAt) && receivedAt <= now + 5000 && receivedAt >= now - 60_000 ? receivedAt : now;
+    const result = marketDataStore.ingest(item.eventName, item.payload, safeReceivedAt);
+    if (result.accepted) accepted++;
+  }
+  if (accepted) {
+    const snapshot = marketDataStore.getSnapshot(now);
+    if (snapshot.acceptedTickCount && Math.floor(snapshot.acceptedTickCount / 250) !== Math.floor((snapshot.acceptedTickCount - accepted) / 250)) {
+      log('info', 'Получены рыночные данные Pocket Option', {
+        assets: snapshot.assetCount, catalogAssets: snapshot.catalogAssetCount,
+        ticks: snapshot.acceptedTickCount, lastEvent: snapshot.lastEventName
+      });
+    }
+    if (now - marketStatusPublishedAt >= 1000) {
+      marketStatusPublishedAt = now;
+      publishStatus();
+    }
+  }
+});
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
 ipcMain.handle('app:logs:read', () => {
   try { return fs.readFileSync(logFile(), 'utf8').split(/\r?\n/).filter(Boolean).slice(-1000).map(line => { try { return JSON.parse(line); } catch (_) { return { message: line }; } }); }
