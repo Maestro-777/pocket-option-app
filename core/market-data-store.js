@@ -2,9 +2,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { TIMEFRAME_MS } = require('./timeframes');
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const VALID_TIMEFRAMES = new Set(Object.keys(TIMEFRAME_MS));
 
 function validateCandle(candle) {
@@ -51,10 +52,10 @@ class MarketDataStore {
   }
 
   _migrate() {
-    const version = Number(this.db.prepare('PRAGMA user_version').get().user_version);
+    let version = Number(this.db.prepare('PRAGMA user_version').get().user_version);
     if (version > SCHEMA_VERSION) throw new Error('База создана более новой версией приложения');
     if (version === 0) {
-      this.db.exec(`
+      this.db.exec(\`
         BEGIN IMMEDIATE;
         CREATE TABLE market_candles (
           asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64),
@@ -81,7 +82,35 @@ class MarketDataStore {
         ) STRICT, WITHOUT ROWID;
         PRAGMA user_version = 1;
         COMMIT;
-      `);
+      \`);
+      version = 1;
+    }
+    if (version < 2) {
+      this.db.exec(\`
+        BEGIN IMMEDIATE;
+        CREATE TABLE manual_examples (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64 AND substr(asset,-4) = '_OTC'),
+          timeframe TEXT NOT NULL CHECK(timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          segment_start INTEGER NOT NULL CHECK(segment_start > 0),
+          segment_end INTEGER NOT NULL CHECK(segment_end > segment_start),
+          entry_at INTEGER NOT NULL CHECK(entry_at >= segment_start AND entry_at <= segment_end),
+          direction TEXT NOT NULL CHECK(direction IN ('UP','DOWN')),
+          expiry_seconds INTEGER NOT NULL CHECK(expiry_seconds BETWEEN 1 AND 86400),
+          entry_price REAL NOT NULL CHECK(entry_price > 0),
+          expiry_price REAL CHECK(expiry_price IS NULL OR expiry_price > 0),
+          outcome TEXT NOT NULL CHECK(outcome IN ('WIN','LOSS','DRAW','UNKNOWN')),
+          input_candles_json TEXT NOT NULL CHECK(json_valid(input_candles_json)),
+          post_candles_json TEXT NOT NULL CHECK(json_valid(post_candles_json)),
+          notes TEXT NOT NULL CHECK(length(notes) <= 2000),
+          created_at INTEGER NOT NULL CHECK(created_at > 0),
+          updated_at INTEGER NOT NULL CHECK(updated_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX idx_manual_examples_asset_tf ON manual_examples(asset,timeframe,created_at);
+        CREATE INDEX idx_manual_examples_created ON manual_examples(created_at);
+        PRAGMA user_version = 2;
+        COMMIT;
+      \`);
     }
   }
 
@@ -95,6 +124,13 @@ class MarketDataStore {
         close=excluded.close, tick_count=excluded.tick_count, updated_at=excluded.updated_at
       WHERE excluded.updated_at >= market_candles.updated_at
     `);
+    this._insertManualExample = this.db.prepare(\`
+      INSERT INTO manual_examples (id,asset,timeframe,segment_start,segment_end,entry_at,direction,expiry_seconds,entry_price,expiry_price,outcome,input_candles_json,post_candles_json,notes,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    \`);
+    this._updateManualExample = this.db.prepare(\`
+      UPDATE manual_examples SET asset=?,timeframe=?,segment_start=?,segment_end=?,entry_at=?,direction=?,expiry_seconds=?,entry_price=?,expiry_price=?,outcome=?,input_candles_json=?,post_candles_json=?,notes=?,updated_at=? WHERE id=?
+    \`);
     this._upsertAsset = this.db.prepare(`
       INSERT INTO asset_catalog (asset,raw_symbol,label,is_otc,updated_at) VALUES (?,?,?,?,?)
       ON CONFLICT(asset) DO UPDATE SET raw_symbol=excluded.raw_symbol, label=excluded.label,
@@ -203,6 +239,121 @@ class MarketDataStore {
     }));
   }
 
+  _normalizeManualExample(example, options = {}) {
+    if (!example || typeof example !== 'object' || Array.isArray(example)) throw new TypeError('Пример должен быть объектом');
+    const id = String(example.id || crypto.randomUUID());
+    const asset = String(example.asset || '').trim().toUpperCase();
+    const timeframe = String(example.timeframe || '').trim().toUpperCase();
+    const segmentStart = Number(example.segmentStart), segmentEnd = Number(example.segmentEnd), entryAt = Number(example.entryAt);
+    const expirySeconds = Number(example.expirySeconds);
+    const entryPrice = Number(example.entryPrice);
+    const expiryPrice = example.expiryPrice == null ? null : Number(example.expiryPrice);
+    const direction = String(example.direction || '').toUpperCase();
+    let outcome = String(example.outcome || 'UNKNOWN').toUpperCase();
+    const notes = String(example.notes || '');
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new TypeError('Некорректный идентификатор примера');
+    if (!asset.endsWith('_OTC') || !/^[A-Z0-9._-]{1,64}$/.test(asset)) throw new TypeError('Пример должен относиться к OTC-активу');
+    if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (![segmentStart, segmentEnd, entryAt].every(Number.isSafeInteger) || segmentStart <= 0 || segmentEnd <= segmentStart || entryAt < segmentStart || entryAt > segmentEnd) throw new TypeError('Некорректные границы участка или точка входа');
+    if (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400) throw new TypeError('Экспирация должна быть от 1 до 86400 секунд');
+    if (!['UP','DOWN'].includes(direction)) throw new TypeError('Направление должно быть UP или DOWN');
+    if (!Number.isFinite(entryPrice) || entryPrice <= 0 || (expiryPrice != null && (!Number.isFinite(expiryPrice) || expiryPrice <= 0))) throw new TypeError('Некорректная цена входа или экспирации');
+    if (!['WIN','LOSS','DRAW','UNKNOWN'].includes(outcome)) throw new TypeError('Некорректный результат примера');
+    if (notes.length > 2000) throw new RangeError('Примечание не должно превышать 2000 символов');
+    if (!Array.isArray(example.inputCandles) || !example.inputCandles.length || example.inputCandles.length > 300) throw new TypeError('Нужны от 1 до 300 предвходящих свечей');
+    if (!Array.isArray(example.postCandles) || !example.postCandles.length || example.postCandles.length > 300) throw new TypeError('Нужны от 1 до 300 поствходящих свечей');
+    const validateSnapshot = (candles, kind) => {
+      const normalized = candles.map(candle => validateCandle({ ...candle, complete: true }));
+      for (let i = 0; i < normalized.length; i++) {
+        const candle = normalized[i];
+        if (candle.asset !== asset || candle.timeframe !== timeframe) throw new TypeError('Свечи примера должны совпадать по активу и таймфрейму');
+        if (i && candle.startAt <= normalized[i - 1].startAt) throw new TypeError('Свечи примера должны быть строго упорядочены');
+        if (kind === 'input' && (candle.startAt < segmentStart || candle.endAt > entryAt)) throw new TypeError('Предвходящие признаки не могут содержать свечи после точки входа');
+        if (kind === 'post' && (candle.endAt <= entryAt || candle.startAt > segmentEnd || candle.endAt > segmentEnd)) throw new TypeError('Поствходящие свечи должны располагаться после входа внутри участка');
+      }
+      return normalized;
+    };
+    const input = validateSnapshot(example.inputCandles, 'input');
+    const post = validateSnapshot(example.postCandles, 'post');
+    if (expiryPrice != null && outcome === 'UNKNOWN') {
+      outcome = expiryPrice === entryPrice ? 'DRAW'
+        : ((direction === 'UP' && expiryPrice > entryPrice) || (direction === 'DOWN' && expiryPrice < entryPrice)) ? 'WIN' : 'LOSS';
+    }
+    const createdAt = Number(options.createdAt ?? options.now ?? Date.now());
+    const updatedAt = Number(options.now ?? Date.now());
+    if (!Number.isSafeInteger(createdAt) || createdAt <= 0 || !Number.isSafeInteger(updatedAt) || updatedAt <= 0) throw new TypeError('Некорректные временные метки примера');
+    return { id, asset, timeframe, segmentStart, segmentEnd, entryAt, direction, expirySeconds,
+      entryPrice, expiryPrice, outcome, inputCandles: input, postCandles: post, notes, createdAt, updatedAt };
+  }
+
+  _mapManualExample(row) {
+    return {
+      id: row.id, asset: row.asset, timeframe: row.timeframe,
+      segmentStart: row.segment_start, segmentEnd: row.segment_end, entryAt: row.entry_at,
+      direction: row.direction, expirySeconds: row.expiry_seconds,
+      entryPrice: row.entry_price, expiryPrice: row.expiry_price, outcome: row.outcome,
+      inputCandles: JSON.parse(row.input_candles_json), postCandles: JSON.parse(row.post_candles_json),
+      notes: row.notes, createdAt: row.created_at, updatedAt: row.updated_at
+    };
+  }
+
+  createManualExample(example, now = Date.now()) {
+    this._assertOpen();
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время создания');
+    const normalized = this._normalizeManualExample(example, { now });
+    this._insertManualExample.run(
+      normalized.id, normalized.asset, normalized.timeframe, normalized.segmentStart, normalized.segmentEnd,
+      normalized.entryAt, normalized.direction, normalized.expirySeconds, normalized.entryPrice,
+      normalized.expiryPrice, normalized.outcome, JSON.stringify(normalized.inputCandles),
+      JSON.stringify(normalized.postCandles), normalized.notes, normalized.createdAt, normalized.updatedAt
+    );
+    return this.getManualExample(normalized.id);
+  }
+
+  getManualExample(id) {
+    this._assertOpen();
+    const row = this.db.prepare('SELECT * FROM manual_examples WHERE id=?').get(String(id));
+    return row ? this._mapManualExample(row) : null;
+  }
+
+  listManualExamples(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 500 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10000) throw new RangeError('limit должен быть от 1 до 10000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).trim().toUpperCase();
+    if (asset && !asset.endsWith('_OTC')) throw new TypeError('Фильтр допускает только OTC-активы');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    const rows = this.db.prepare(\`
+      SELECT * FROM manual_examples
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+      ORDER BY created_at DESC, id LIMIT ?
+    \`).all(asset, asset, timeframe, timeframe, limit);
+    return rows.map(row => this._mapManualExample(row));
+  }
+
+  updateManualExample(id, changes, now = Date.now()) {
+    this._assertOpen();
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время обновления');
+    const existing = this.getManualExample(id);
+    if (!existing) return null;
+    const merged = { ...existing, ...changes, id: existing.id, createdAt: existing.createdAt };
+    const normalized = this._normalizeManualExample(merged, { now, createdAt: existing.createdAt });
+    this._updateManualExample.run(
+      normalized.asset, normalized.timeframe, normalized.segmentStart, normalized.segmentEnd,
+      normalized.entryAt, normalized.direction, normalized.expirySeconds, normalized.entryPrice,
+      normalized.expiryPrice, normalized.outcome, JSON.stringify(normalized.inputCandles),
+      JSON.stringify(normalized.postCandles), normalized.notes, normalized.updatedAt, normalized.id
+    );
+    return this.getManualExample(normalized.id);
+  }
+
+  deleteManualExample(id) {
+    this._assertOpen();
+    const result = this.db.prepare('DELETE FROM manual_examples WHERE id=?').run(String(id));
+    return Number(result.changes || 0) > 0;
+  }
+
   pruneCandles(maxCandlesPerSeries = 300) {
     this._assertOpen();
     const limit = Number(maxCandlesPerSeries);
@@ -235,6 +386,7 @@ class MarketDataStore {
       assets: Number(this.db.prepare('SELECT COUNT(DISTINCT asset) AS count FROM market_candles').get().count),
       catalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog').get().count),
       otcCatalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog WHERE is_otc=1').get().count),
+      manualExamples: Number(this.db.prepare('SELECT COUNT(*) AS count FROM manual_examples').get().count),
       schemaVersion: SCHEMA_VERSION
     };
   }
