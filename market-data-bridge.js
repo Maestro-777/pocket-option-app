@@ -37,13 +37,13 @@ function publish(name,payload,ws){
     }
    }
   }else if(name==='updateAssets'){
-   if(Array.isArray(row)&&row.length>=2&&typeof row[1]==='string')safe.push(row.slice(0,3));
-   else if(row&&typeof row==='object'){const symbol=row.rawSymbol||row.symbol||row.asset||row.code||row.s;if(typeof symbol==='string')safe.push({rawSymbol:symbol,symbol,name:row.name||row.title||row.label||row.n||symbol});}
-  }else if(Array.isArray(row)&&row.length>=3&&typeof row[0]==='string')safe.push([row[0],row[1],row[2]]);
+   if(Array.isArray(row)&&row.length>=2&&typeof row[1]==='string'&&row[1].length<=64)safe.push([row[0],row[1],typeof row[2]==='string'?row[2].slice(0,100):row[2]]);
+   else if(row&&typeof row==='object'){const symbol=row.rawSymbol||row.symbol||row.asset||row.code||row.s;if(typeof symbol==='string'&&symbol.length<=64)safe.push({rawSymbol:symbol,symbol,name:String(row.name||row.title||row.label||row.n||symbol).slice(0,100)});}
+  }else if(Array.isArray(row)&&row.length>=3&&typeof row[0]==='string'&&row[0].length<=64)safe.push([row[0],bounded(row[1]),bounded(row[2])]);
   else if(row&&typeof row==='object'){
-   const asset=row.asset||row.symbol;if(typeof asset!=='string')continue;
-   if(Array.isArray(row.prices)){for(const t of row.prices){if(t&&typeof t==='object')safe.push({asset,timestamp:t.timestamp??t.time??t.ts,price:t.price??t.p});if(safe.length>=MAX_ROWS)break;}}
-   else safe.push({asset,timestamp:row.timestamp??row.ts??row.time,price:row.price??row.close??row.p});
+   const asset=row.asset||row.symbol;if(typeof asset!=='string'||asset.length>64)continue;
+   if(Array.isArray(row.prices)){for(const t of row.prices){if(t&&typeof t==='object')safe.push({asset,timestamp:bounded(t.timestamp??t.time??t.ts),price:bounded(t.price??t.p)});if(safe.length>=MAX_ROWS)break;}}
+   else safe.push({asset,timestamp:bounded(row.timestamp??row.ts??row.time),price:bounded(row.price??row.close??row.p)});
   }
  }
  if(!safe.length)return;
