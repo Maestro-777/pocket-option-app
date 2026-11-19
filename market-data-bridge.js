@@ -18,14 +18,14 @@ function publish(name,payload,ws){
   if(name==='successcloseOrder'||name==='s_orders/close'){
    const deals=Array.isArray(row)?row:Array.isArray(row&&row.deals)?row.deals:null;
    const cleanDeal=item=>{
-    if(!item||typeof item!=='object')return null;const out={},str=(v,n)=>v==null?undefined:String(v).slice(0,n),num=v=>Number.isFinite(Number(v))?Number(v):undefined;
+    if(!item||typeof item!=='object')return null;const out={},str=(v,n)=>v==null?undefined:String(v).slice(0,n),num=v=>v==null?undefined:Number.isFinite(Number(v))?Number(v):undefined;
     for(const key of ['id','ticket']){const v=str(item[key],128);if(v!==undefined)out[key]=v;}
     for(const key of ['asset','symbol','pair']){const v=str(item[key],64);if(v!==undefined)out[key]=v;}
     for(const key of ['direction','status','result']){const v=str(item[key],24);if(v!==undefined)out[key]=v;}
     for(const key of ['amount','investment','profit','netProfit','percentProfit','timestamp','time']){const v=num(item[key]);if(v!==undefined)out[key]=v;}
     return out;
    };
-   if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length){const wrapper={deals:clean},balance=Number((row&&row.balance)??(row&&row.wallet));if(Number.isFinite(balance)&&balance>=0)wrapper.balance=balance;safe.push(wrapper);}}
+   if(deals){const clean=deals.map(cleanDeal).filter(Boolean);if(clean.length){const wrapper={deals:clean},rawBalance=(row&&row.balance)??(row&&row.wallet),balance=Number(rawBalance);if(rawBalance!=null&&Number.isFinite(balance)&&balance>=0)wrapper.balance=balance;safe.push(wrapper);}}
    else{const clean=cleanDeal(row);if(clean)safe.push(clean);}
   }else if(name.startsWith('updateHistory')||name.startsWith('loadHistory')||name==='history/list/v2'){
    const data=Array.isArray(row)?row[0]:row;
