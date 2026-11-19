@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { PocketOptionProtocol, normalizeStreamTicks, toMilliseconds } = require('../core/pocketoption-protocol');
+const { PocketOptionProtocol, normalizeStreamTicks, normalizeTradeResults, toMilliseconds } = require('../core/pocketoption-protocol');
 
 test('decodes Socket.IO text frames with ticks for multiple assets', () => {
   const decoder = new PocketOptionProtocol();
@@ -38,6 +38,33 @@ test('normalizes seconds and milliseconds and rejects malformed frames', () => {
   assert.equal(decoder.decodeFrame('not a socket frame'), null);
   assert.equal(decoder.decodeFrame(new Uint8Array([255]).buffer), null);
   assert.equal(decoder.stats.malformedFrames, 2);
+});
+
+test('normalizes successcloseOrder results and balance without duplicating page-load history', () => {
+  const results = normalizeTradeResults('successcloseOrder', {
+    balance: 105.5,
+    deals: [
+      { id: 123, asset: 'EURUSD_otc', timeframe: 'S5', direction: 'call', amount: 5, profit: 4.5, percentProfit: 90 },
+      { ticket: 't-2', amount: 2, profit: 0 }
+    ]
+  }, 1700000000000);
+  assert.equal(results.length, 2);
+  assert.deepEqual(
+    { id: results[0].brokerTradeId, asset: results[0].asset, timeframe: results[0].timeframe, direction: results[0].direction, amount: results[0].amount, profit: results[0].profit, result: results[0].result, balance: results[0].balanceAfter },
+    { id: '123', asset: 'EURUSD_otc', timeframe: 'S5', direction: 'UP', amount: 5, profit: 4.5, result: 'WIN', balance: 105.5 }
+  );
+  assert.equal(results[1].profit, -2);
+  assert.equal(results[1].result, 'LOSS');
+  assert.deepEqual(normalizeTradeResults('orders/closed/list', [{ id: 1, profit: 5 }]), []);
+});
+
+test('normalizes legacy close events including draw results', () => {
+  const results = normalizeTradeResults('s_orders/close', [[
+    { id: 7, amount: 3, status: 'draw', profit: 0 },
+    { id: 8, amount: 4, status: 'win', profit: 3.6 },
+    { id: 9, amount: 2, status: 'lose', profit: 0 }
+  ]], 1700000001000);
+  assert.deepEqual(results.map(item => [item.result, item.profit]), [['DRAW', 0], ['WIN', 3.6], ['LOSS', -2]]);
 });
 
 test('uses receive time for object-shaped stream rows without timestamps', () => {
