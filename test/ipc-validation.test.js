@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   isAllowedPocketOptionUrl,
+  isTrustedPocketOptionFrame,
   validateBalancePayload,
   validateMarketBatch
 } = require('../core/ipc-validation');
@@ -57,4 +58,22 @@ test('rejects oversized, empty and overlong market batches', () => {
   assert.deepEqual(validateMarketBatch([{
     eventName: 'updateAssets', payload: 'x'.repeat(300_000)
   }], Date.now()), []);
+});
+
+test('binds IPC trust to the expected webContents and Pocket Option frame', () => {
+  const sender = {};
+  const otherSender = {};
+  assert.equal(isTrustedPocketOptionFrame({
+    sender, senderFrame: { url: 'https://pocketoption.com/ru/cabinet/' }
+  }, sender), true);
+  assert.equal(isTrustedPocketOptionFrame({
+    sender, senderFrame: { url: 'https://sub.pocketoption.com/' }
+  }, sender), true);
+  assert.equal(isTrustedPocketOptionFrame({
+    sender: otherSender, senderFrame: { url: 'https://pocketoption.com/' }
+  }, sender), false);
+  assert.equal(isTrustedPocketOptionFrame({
+    sender, senderFrame: { url: 'https://pocketoption.com.attacker.test/' }
+  }, sender), false);
+  assert.equal(isTrustedPocketOptionFrame({ sender }, sender, 'https://pocketoption.com/'), true);
 });
