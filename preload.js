@@ -33,6 +33,7 @@ const api = {
   onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); },
   onMarketData: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:market-data', h); return () => ipcRenderer.removeListener('app:market-data', h); },
   onSignalDecision: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:signal-decision', h); return () => ipcRenderer.removeListener('app:signal-decision', h); },
+  openAnnotationWindow: () => ipcRenderer.invoke('app:annotation:open-window'),
   getTradingState: () => ipcRenderer.invoke('app:trading:get-state'),
   setTradingEnabled: enabled => ipcRenderer.invoke('app:trading:set-enabled', enabled),
   setTradingPaused: paused => ipcRenderer.invoke('app:trading:set-paused', paused),
