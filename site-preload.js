@@ -24,12 +24,12 @@ if (!window.__PT_PO_PRELOAD_BRIDGE_INSTALLED__) {
     if (!element) return null;
     const raw = (element.getAttribute('data-hd-value') ||
       element.getAttribute('data-balance') || element.textContent || '')
-      .replace(/\\s/g, '').replace(/[^0-9,.-]/g, '');
+      .replace(/\s/g, '').replace(/[^0-9,.-]/g, '');
     if (!raw) return null;
     let value = raw;
     if (value.includes(',') && value.includes('.')) {
       value = value.lastIndexOf(',') > value.lastIndexOf('.')
-        ? value.replace(/\\./g, '').replace(',', '.') : value.replace(/,/g, '');
+        ? value.replace(/\./g, '').replace(',', '.') : value.replace(/,/g, '');
     } else if (value.includes(',')) value = value.replace(',', '.');
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 ? number : null;
