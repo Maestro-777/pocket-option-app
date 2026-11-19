@@ -1,6 +1,7 @@
 'use strict';
 
 function metric(value) {
+  if (value == null || value === '') return -1;
   const number = Number(value);
   return Number.isFinite(number) ? number : -1;
 }
