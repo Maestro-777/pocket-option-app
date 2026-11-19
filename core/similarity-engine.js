@@ -138,8 +138,20 @@ function analyzeSimilarity(input) {
   let skipped = 0;
   for (const example of candidates) {
     if (!example || String(example.timeframe || '').toUpperCase() !== timeframe) { skipped++; continue; }
-    // In walk-forward/backtests, a labelled example is usable only after its own entry time.
-    if (!Number.isSafeInteger(Number(example.entryAt)) || Number(example.entryAt) >= entryAt) { skipped++; continue; }
+    // A labelled sample is usable only after its entire observation/outcome window
+    // has elapsed. This prevents both feature leakage and using an outcome that
+    // would not yet have been known at the simulated decision time.
+    const sampleEntryAt = Number(example.entryAt);
+    const sampleSegmentEnd = Number(example.segmentEnd ?? example.entryAt);
+    const sampleExpirySeconds = Number(example.expirySeconds);
+    const outcomeKnownAt = Math.max(
+      sampleSegmentEnd,
+      sampleEntryAt + (Number.isFinite(sampleExpirySeconds) && sampleExpirySeconds > 0 ? sampleExpirySeconds * 1000 : 0)
+    );
+    if (!Number.isSafeInteger(sampleEntryAt) || sampleEntryAt >= entryAt ||
+        !Number.isSafeInteger(sampleSegmentEnd) || !Number.isSafeInteger(outcomeKnownAt) || outcomeKnownAt > entryAt) {
+      skipped++; continue;
+    }
     if (!['UP', 'DOWN'].includes(String(example.direction || '').toUpperCase())) { skipped++; continue; }
     if (!Array.isArray(example.inputCandles) || example.inputCandles.length < 3) { skipped++; continue; }
     try {
