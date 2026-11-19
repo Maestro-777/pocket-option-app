@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { analyzeSimilarity, extractFeatures, validateOptions } = require('../core/similarity-engine');
+const { analyzeSimilarity, extractFeatures, validateOptions, evaluateWalkForward } = require('../core/similarity-engine');
 
 const TIMEFRAME = 'S5';
 const DURATION = 5000;
@@ -97,6 +97,23 @@ test('refuses unfinished or future candles in the live query', () => {
     examples: [example('sample', 'UP')],
     options: { topK: 1, minExamples: 1, minDirectionVotes: 1 }
   }), /Будущая или незакрытая/);
+});
+
+test('walk-forward evaluation uses only strictly earlier examples and reports coverage', () => {
+  const examples = Array.from({ length: 8 }, (_, i) => ({
+    ...example('wf-' + i, 'UP', i === 7 ? 'LOSS' : 'WIN'),
+    entryAt: 155000 + i * 5000
+  }));
+  const report = evaluateWalkForward(examples, { topK: 10, minExamples: 3, minDirectionVotes: 6, lookback: 30, minSimilarity: 80 });
+  assert.equal(report.evaluated, 8);
+  assert.equal(report.signals, 2);
+  assert.equal(report.noSignal, 6);
+  assert.equal(report.correct, 1);
+  assert.equal(report.incorrect, 1);
+  assert.equal(report.accuracy, 50);
+  assert.equal(report.coverage, 25);
+  assert.equal(report.results[6].predictedDirection, 'UP');
+  assert.equal(report.results[7].actualDirection, 'DOWN');
 });
 
 test('validates configurable thresholds and refuses unsupported timeframes', () => {
