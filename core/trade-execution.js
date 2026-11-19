@@ -51,11 +51,12 @@ class TradeExecutionAdapter{
    await this.gate.cancelReservation(reservation.reservation.reservationId,result&&result.reason||'page_rejected');if(this.ledger)await this.ledger.markRejected(tradeId,result&&result.reason||'page_rejected').catch(()=>{});
    return this._reject(signal,result&&result.reason||'page_rejected',{pageResult:result||null});
   }
-  if(this.ledger){try{await this.ledger.markSubmitted(tradeId);}catch(error){await this.gate.confirmOpened(reservation.reservation.reservationId,tradeId).catch(()=>{});return this._reject(signal,'ledger_submission_update_failed',{message:String(error.message||error),submitted:true});}}
-  try{await this.gate.confirmOpened(reservation.reservation.reservationId,tradeId);}
-  catch(error){return this._reject(signal,'submission_recording_failed',{message:String(error.message||error),submitted:true});}
   const record={tradeId,signalId:String(signal.signalId),pair:asset,timeframe:String(signal.timeframe),direction:signal.decision.direction,amount,expirySeconds,accountMode:'DEMO',submittedAt,status:'SUBMITTED_UNCONFIRMED',platformConfirmed:false,decision:signal.decision};
+  let ledgerError=null;if(this.ledger){try{await this.ledger.markSubmitted(tradeId);}catch(error){ledgerError=String(error.message||error);}}
+  try{await this.gate.confirmOpened(reservation.reservation.reservationId,tradeId);}
+  catch(error){this.gate.restoreOpenTrades([{...record,status:'SUBMITTED_UNCONFIRMED'}]);}
   this.submitted.set(tradeId,record);
+  if(ledgerError)this.onUpdate({type:'ledger_error',tradeId,message:ledgerError,submitted:true});
   try{await this._journal('TRADE_OPENED',record,{maxOpenTrades,baseBet:amount,defaultExpirySeconds:expirySeconds,accountMode:'DEMO'});}catch(error){this.onUpdate({type:'journal_error',tradeId,message:String(error.message||error)});}
   this.onUpdate({type:'submitted',trade:record});
   return{ok:true,status:'SUBMITTED_UNCONFIRMED',trade:record,pageResult:result};
