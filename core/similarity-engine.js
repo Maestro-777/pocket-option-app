@@ -200,4 +200,74 @@ function analyzeSimilarity(input) {
   };
 }
 
-module.exports = { DEFAULTS, validateOptions, extractFeatures, compareFeatures, analyzeSimilarity };
+
+/**
+ * Chronological walk-forward evaluation over labelled examples.
+ * A sample is tested only against examples whose entryAt is strictly earlier.
+ * The target direction is the manually selected direction for WIN and its
+ * opposite for LOSS; DRAW/UNKNOWN are excluded from accuracy.
+ */
+function evaluateWalkForward(examples, options = {}) {
+  if (!Array.isArray(examples)) throw new TypeError('examples должен быть массивом');
+  const config = validateOptions(options);
+  const ordered = examples.slice().filter(example => example && Number.isSafeInteger(Number(example.entryAt)))
+    .sort((a, b) => Number(a.entryAt) - Number(b.entryAt) || String(a.id || '').localeCompare(String(b.id || '')));
+  let evaluated = 0, skippedInsufficientHistory = 0, skippedUnknownOutcome = 0;
+  let signals = 0, noSignal = 0, correct = 0, incorrect = 0;
+  const results = [];
+
+  for (let i = 0; i < ordered.length; i++) {
+    const sample = ordered[i];
+    if (!['WIN', 'LOSS'].includes(String(sample.outcome || '').toUpperCase())) {
+      skippedUnknownOutcome++;
+      continue;
+    }
+    if (!Array.isArray(sample.inputCandles) || sample.inputCandles.length < config.lookback) {
+      skippedInsufficientHistory++;
+      continue;
+    }
+    const prior = ordered.slice(0, i);
+    const analysis = analyzeSimilarity({
+      timeframe: sample.timeframe,
+      entryAt: Number(sample.entryAt),
+      candles: sample.inputCandles,
+      examples: prior,
+      options: config
+    });
+    evaluated++;
+    if (analysis.status !== 'SIGNAL') {
+      noSignal++;
+      results.push({ id: sample.id, status: 'NO_SIGNAL', actualDirection: sample.outcome === 'WIN' ? sample.direction : (sample.direction === 'UP' ? 'DOWN' : 'UP') });
+      continue;
+    }
+    signals++;
+    const actualDirection = sample.outcome === 'WIN'
+      ? String(sample.direction).toUpperCase()
+      : (String(sample.direction).toUpperCase() === 'UP' ? 'DOWN' : 'UP');
+    const isCorrect = analysis.direction === actualDirection;
+    if (isCorrect) correct++; else incorrect++;
+    results.push({
+      id: sample.id, status: 'SIGNAL', predictedDirection: analysis.direction,
+      actualDirection, correct: isCorrect, similarity: analysis.averageSimilarity,
+      votes: analysis.votes
+    });
+  }
+
+  return {
+    timeframe: ordered[0]?.timeframe || null,
+    options: config,
+    totalExamples: examples.length,
+    evaluated,
+    skippedInsufficientHistory,
+    skippedUnknownOutcome,
+    signals,
+    noSignal,
+    correct,
+    incorrect,
+    accuracy: signals ? Number((correct / signals * 100).toFixed(2)) : null,
+    coverage: evaluated ? Number((signals / evaluated * 100).toFixed(2)) : 0,
+    results
+  };
+}
+
+module.exports = { DEFAULTS, validateOptions, extractFeatures, compareFeatures, analyzeSimilarity, evaluateWalkForward };
