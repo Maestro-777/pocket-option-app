@@ -9,7 +9,7 @@
 ### Основной: pocket-option-app
 https://github.com/Maestro-777/pocket-option-app
 
-Целевой репозиторий Electron-приложения и его будущего торгового ядра. Текущий package.json указывает версию 0.1.1. README описывает оболочку управления окном Pocket Option и постоянной сессией.
+Целевой репозиторий Electron-приложения, market-data pipeline, ручной разметки, Similarity Engine, фонового scanner и будущего торгового ядра. Текущий package.json указывает версию 0.1.1.
 
 ### Вторичный: pocket-tracker
 https://github.com/Maestro-777/pocket-tracker
@@ -23,6 +23,36 @@ https://github.com/Maestro-777/pocket-tracker/blob/main/3.6.0_0/ARCHITECTURE.md
 - промт.txt: «Всегда работай в режиме размышление». Это предпочтение работы, не функциональное требование приложения.
 - Архитектура-расширения-PocketOption-Signal-3.6.0.txt: ссылка на архитектуру pocket-tracker 3.6.0.
 - Репозитории.txt: основной и вторичный репозитории и их роли.
+
+## Текущая реализация на ветке work/market-data-pipeline
+
+- WebSocket/CDP capture и протокольный парсер для OTC тиков/истории.
+- Независимые OHLC серии по десяти таймфреймам; ограниченный rolling storage и SQLite.
+- Ручная разметка с независимыми snapshots до входа и после входа.
+- Similarity Engine: shape features, общий пул OTC примеров в рамках того же таймфрейма, top-N, порог, directional consensus.
+- Защита от look-ahead: только закрытые непрерывные свечи; пример доступен после segmentEnd и expiry.
+- Walk-forward evaluator с accuracy и coverage.
+- Event-driven DecisionScanner по выбранным активам/таймфреймам; автоматический журнал сигналов и отказов.
+- Revision-aware deduplication: исправление свечи, примера или настроек инициирует повторный анализ.
+- Ranking helper и изолированный trade-intent planner с pause, лимитом 1–10 и duplicate guard.
+- SQLite schema v4 decision journal с snapshot параметров, совпадений, голосов, исторической результативности и query candles.
+- В labeler UI отображаются ранжированные текущие сигналы и журнал решений.
+
+## Текущие ограничения / незавершённые функции
+
+- Live end-to-end работа на текущем сайте Pocket Option ещё не подтверждена; охват всех OTC-пар зависит от фактического WebSocket потока.
+- Глубокая история для всех пар одновременно не гарантируется; rolling history ограничена.
+- Ranking/planner ещё не подключены к live торговому исполнителю и реальным open positions.
+- Multi-pair execution не реализовано: текущий extension-код нажимает кнопки активного DOM-инструмента.
+- Торговый ledger, фактический P/L, статистика по парам/таймфреймам и DEMO/REAL ещё не реализованы.
+- Walk-forward evaluator ещё нужно запустить на пользовательской выборке; 80% сходства не равно вероятности выигрыша.
+
+## Git / ветки
+
+- Основная ветка: `main`.
+- Рабочая ветка реализации: `work/market-data-pipeline`.
+- PR: https://github.com/Maestro-777/pocket-option-app/pull/3
+- Изменения рабочей ветки не считать влитым релизом, пока PR не смержен и CI не прошёл на актуальном HEAD.
 
 ## Принципы взаимодействия
 - Общаться на русском.
