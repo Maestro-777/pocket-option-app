@@ -14,6 +14,75 @@ function toMilliseconds(value) {
   return Number.isSafeInteger(milliseconds) ? milliseconds : null;
 }
 
+
+const { TIMEFRAME_MS } = require('./timeframes');
+const HISTORY_EVENTS = new Set(['updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2']);
+
+function detectHistoryOhlcLayout(rows) {
+  let openCloseHighLow = 0, openHighLowClose = 0, checked = 0;
+  for (const row of rows) {
+    if (checked >= 40) break;
+    if (!Array.isArray(row) || row.length < 5) continue;
+    const values = row.slice(1, 5).map(Number);
+    if (!values.every(value => Number.isFinite(value) && value > 0)) continue;
+    checked++;
+    const high = Math.max(...values), low = Math.min(...values);
+    if (values[2] === high && values[3] === low) openCloseHighLow++;
+    if (values[1] === high && values[2] === low) openHighLowClose++;
+  }
+  if (!checked) return null;
+  if (openCloseHighLow >= openHighLowClose && openCloseHighLow > 0) return { open: 1, close: 2, high: 3, low: 4 };
+  if (openHighLowClose > 0) return { open: 1, high: 2, low: 3, close: 4 };
+  return null;
+}
+
+function normalizeHistoryCandles(eventName, payload, options = {}) {
+  if (!HISTORY_EVENTS.has(eventName)) return { asset: null, timeframe: null, candles: [], skippedRows: 0 };
+  const data = Array.isArray(payload) ? payload[0] : payload;
+  if (!data || typeof data !== 'object' || typeof data.asset !== 'string') {
+    return { asset: null, timeframe: null, candles: [], skippedRows: Array.isArray(data) ? data.length : 1 };
+  }
+  const periodSeconds = Number(data.period);
+  const timeframe = Object.keys(TIMEFRAME_MS).find(key => TIMEFRAME_MS[key] / 1000 === periodSeconds);
+  const rows = data.history || data.data || data.candles;
+  if (!timeframe || !Array.isArray(rows)) {
+    return { asset: data.asset, timeframe: null, candles: [], skippedRows: Array.isArray(rows) ? rows.length : 0 };
+  }
+  const duration = TIMEFRAME_MS[timeframe];
+  const layout = detectHistoryOhlcLayout(rows);
+  const asOf = options.asOf == null ? Date.now() : Number(options.asOf);
+  if (!Number.isSafeInteger(asOf) || asOf <= 0) return { asset: data.asset, timeframe, candles: [], skippedRows: rows.length };
+  const candles = [];
+  let skippedRows = 0;
+  for (const row of rows) {
+    let timestamp, open, high, low, close;
+    if (Array.isArray(row)) {
+      timestamp = toMilliseconds(row[0]);
+      if (!layout || row.length < 5) { skippedRows++; continue; }
+      open = Number(row[layout.open]); high = Number(row[layout.high]);
+      low = Number(row[layout.low]); close = Number(row[layout.close]);
+    } else if (row && typeof row === 'object') {
+      timestamp = toMilliseconds(row.time ?? row.t ?? row.ts ?? row.timestamp);
+      open = Number(row.open ?? row.o); high = Number(row.high ?? row.h);
+      low = Number(row.low ?? row.l); close = Number(row.close ?? row.c);
+    } else { skippedRows++; continue; }
+    if (timestamp == null || ![open, high, low, close].every(value => Number.isFinite(value) && value > 0)) {
+      skippedRows++; continue;
+    }
+    high = Math.max(open, high, low, close);
+    low = Math.min(open, high, low, close);
+    const startAt = Math.floor(timestamp / duration) * duration;
+    const endAt = startAt + duration;
+    if (endAt > asOf) { skippedRows++; continue; }
+    candles.push({
+      asset: data.asset, timeframe, startAt, endAt, openAt: startAt, closeAt: endAt - 1,
+      open, high, low, close, tickCount: 1, complete: true
+    });
+  }
+  candles.sort((a, b) => a.startAt - b.startAt);
+  return { asset: data.asset, timeframe, candles, skippedRows };
+}
+
 function normalizeStreamTicks(eventName, payload) {
   if (!['updateStream', 'quotes/stream'].includes(eventName)) return [];
   const rows = Array.isArray(payload) && (Array.isArray(payload[0]) || (payload[0] && typeof payload[0] === 'object')) ? payload : [payload];
@@ -102,4 +171,4 @@ class PocketOptionProtocol {
   _malformed() { this.stats.malformedFrames++; return null; }
 }
 
-module.exports = { PocketOptionProtocol, normalizeStreamTicks, toMilliseconds };
+module.exports = { PocketOptionProtocol, normalizeStreamTicks, normalizeHistoryCandles, detectHistoryOhlcLayout, toMilliseconds };
