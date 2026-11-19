@@ -44,6 +44,7 @@ app.whenReady().then(async () => {
     );
     if (!rendererReady) throw new Error('Manual labeling renderer or restricted preload API did not initialize');
     await window.webContents.executeJavaScript('window.pocketApp.getMarketAssets()');
+    await window.webContents.executeJavaScript('Promise.all([window.pocketApp.getTradeResults(), window.pocketApp.getTradeStatistics()])');
     window.destroy();
     console.log('Electron SQLite and manual labeling renderer smoke tests passed');
     app.exit(0);
