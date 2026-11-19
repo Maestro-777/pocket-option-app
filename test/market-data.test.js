@@ -95,3 +95,22 @@ test('stores provider OHLC candles separately from tick history', () => {
     [1.10, 1.12, 1.09, 1.11]
   );
 });
+
+test('aggregates stored per-asset ticks into the agreed timeframes', () => {
+  const store = new MarketDataStore();
+  const base = 1_700_000_000_000;
+  store.ingest('updateStream', [
+    ['EURUSD_otc', base / 1000 + 1, 1.10],
+    ['EURUSD_otc', base / 1000 + 3, 1.20],
+    ['EURUSD_otc', base / 1000 + 6, 1.15],
+    ['GBPUSD_otc', base / 1000 + 2, 1.30]
+  ], base + 10_000);
+  const candles = store.getAggregatedCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000 });
+  assert.equal(candles.length, 2);
+  assert.equal(candles[0].timeframe, 'S5');
+  assert.deepEqual(
+    [candles[0].open, candles[0].high, candles[0].low, candles[0].close],
+    [1.10, 1.20, 1.10, 1.20]
+  );
+  assert.equal(candles.every(candle => candle.complete), true);
+});
