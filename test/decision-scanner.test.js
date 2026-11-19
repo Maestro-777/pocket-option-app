@@ -93,7 +93,7 @@ test('re-scans the same candle after the example dataset is invalidated', async 
   const { scanner, decisions, sample } = fixture();
   scanner.enqueue('EURUSD_OTC');
   await new Promise(resolve => setTimeout(resolve, 300));
-  sample.updatedAt = Date.now() + 1;
+  sample.outcome = 'LOSS';
   scanner.invalidateExamples();
   scanner.enqueue('EURUSD_OTC');
   await new Promise(resolve => setTimeout(resolve, 300));
