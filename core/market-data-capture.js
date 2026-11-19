@@ -97,8 +97,9 @@ class MarketDataCapture {
     if (decoded?.tradeResults?.length) {
       for (const tradeResult of decoded.tradeResults) {
         try {
-          this.onTradeResult(tradeResult);
-          this.receivedTradeResults++;
+          const accepted = this.onTradeResult(tradeResult);
+          if (accepted === false) this.rejectedTradeResults++;
+          else this.receivedTradeResults++;
         } catch (error) {
           this.rejectedTradeResults++;
           this.log('warn', 'Не удалось передать результат сделки в локальный журнал', String(error?.message || error));
