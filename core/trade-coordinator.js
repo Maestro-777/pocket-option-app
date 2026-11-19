@@ -31,12 +31,15 @@ function planTradeIntents(signals, options = {}) {
   const valid = [];
 
   for (const signal of signals) {
+    if (signal?.status && signal.status !== 'SIGNAL') {
+      rejected.push({ signal, signalKey: null, reason: 'not_a_signal' });
+      continue;
+    }
     const key = signalKey(signal);
-    if (signal.status && signal.status !== 'SIGNAL') {
-      rejected.push({ signal, signalKey: key, reason: 'not_a_signal' });
-    } else if (existing.has(key)) {
+    if (existing.has(key)) {
       rejected.push({ signal, signalKey: key, reason: 'duplicate_signal' });
     } else {
+      existing.add(key);
       valid.push({ ...signal, signalKey: key });
     }
   }
