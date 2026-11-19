@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { TIMEFRAME_MS } = require('./timeframes');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const VALID_TIMEFRAMES = new Set(Object.keys(TIMEFRAME_MS));
 
 function validateCandle(candle) {
@@ -112,6 +112,32 @@ class MarketDataStore {
         COMMIT;
       `);
     }
+    if (version < 3) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE analysis_decisions (
+          id TEXT PRIMARY KEY CHECK(length(id) BETWEEN 1 AND 64),
+          asset TEXT NOT NULL CHECK(length(asset) BETWEEN 1 AND 64 AND substr(asset,-4) = '_OTC'),
+          timeframe TEXT NOT NULL CHECK(timeframe IN ('S5','S10','S15','S30','M1','M2','M3','M5','M10','M15')),
+          decision_at INTEGER NOT NULL CHECK(decision_at > 0),
+          status TEXT NOT NULL CHECK(status IN ('SIGNAL','NO_SIGNAL')),
+          direction TEXT CHECK(direction IS NULL OR direction IN ('UP','DOWN')),
+          reason TEXT NOT NULL CHECK(length(reason) BETWEEN 1 AND 128),
+          params_json TEXT NOT NULL CHECK(json_valid(params_json)),
+          matches_json TEXT NOT NULL CHECK(json_valid(matches_json)),
+          votes_json TEXT NOT NULL CHECK(json_valid(votes_json)),
+          average_similarity REAL CHECK(average_similarity IS NULL OR (average_similarity >= 0 AND average_similarity <= 100)),
+          query_candles_json TEXT NOT NULL CHECK(json_valid(query_candles_json)),
+          algorithm_version TEXT NOT NULL CHECK(length(algorithm_version) BETWEEN 1 AND 64),
+          created_at INTEGER NOT NULL CHECK(created_at > 0)
+        ) STRICT, WITHOUT ROWID;
+        CREATE INDEX idx_analysis_decisions_asset_tf_time ON analysis_decisions(asset,timeframe,decision_at DESC);
+        CREATE INDEX idx_analysis_decisions_time ON analysis_decisions(decision_at DESC);
+        CREATE INDEX idx_analysis_decisions_status ON analysis_decisions(status,decision_at DESC);
+        PRAGMA user_version = 3;
+        COMMIT;
+      `);
+    }
   }
 
   _prepareStatements() {
@@ -136,6 +162,11 @@ class MarketDataStore {
       ON CONFLICT(asset) DO UPDATE SET raw_symbol=excluded.raw_symbol, label=excluded.label,
         is_otc=excluded.is_otc, updated_at=excluded.updated_at
       WHERE excluded.updated_at >= asset_catalog.updated_at
+    `);
+    this._insertAnalysisDecision = this.db.prepare(`
+      INSERT INTO analysis_decisions
+      (id,asset,timeframe,decision_at,status,direction,reason,params_json,matches_json,votes_json,average_similarity,query_candles_json,algorithm_version,created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
   }
 
@@ -380,6 +411,93 @@ class MarketDataStore {
     return rows.map(row => ({ asset: row.asset, rawSymbol: row.raw_symbol, label: row.label, isOTC: row.is_otc === 1, updatedAt: row.updated_at }));
   }
 
+  _mapAnalysisDecision(row) {
+    return {
+      id: row.id, asset: row.asset, timeframe: row.timeframe, decisionAt: row.decision_at,
+      status: row.status, direction: row.direction, reason: row.reason,
+      paramsSnapshot: JSON.parse(row.params_json), matches: JSON.parse(row.matches_json),
+      votes: JSON.parse(row.votes_json), averageSimilarity: row.average_similarity,
+      queryCandles: JSON.parse(row.query_candles_json), algorithmVersion: row.algorithm_version,
+      createdAt: row.created_at
+    };
+  }
+
+  createAnalysisDecision(decision, now = Date.now()) {
+    this._assertOpen();
+    if (!decision || typeof decision !== 'object' || Array.isArray(decision)) throw new TypeError('Решение должно быть объектом');
+    if (!Number.isSafeInteger(now) || now <= 0) throw new TypeError('Некорректное время создания решения');
+    const id = String(decision.id || crypto.randomUUID());
+    const asset = String(decision.asset || '').trim().toUpperCase();
+    const timeframe = String(decision.timeframe || '').trim().toUpperCase();
+    const decisionAt = Number(decision.decisionAt);
+    const status = String(decision.status || '').toUpperCase();
+    const direction = decision.direction == null || decision.direction === 'NONE' ? null : String(decision.direction).toUpperCase();
+    const reason = String(decision.reason || '');
+    const algorithmVersion = String(decision.algorithmVersion || 'shape-v1');
+    if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new TypeError('Некорректный идентификатор решения');
+    if (!asset.endsWith('_OTC') || !/^[A-Z0-9._-]{1,64}$/.test(asset)) throw new TypeError('Решение должно относиться к OTC-активу');
+    if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм решения');
+    if (!Number.isSafeInteger(decisionAt) || decisionAt <= 0 || decisionAt > now) throw new TypeError('Некорректное время решения');
+    if (!['SIGNAL', 'NO_SIGNAL'].includes(status)) throw new TypeError('Некорректный статус решения');
+    if ((status === 'SIGNAL' && !['UP', 'DOWN'].includes(direction)) || (status === 'NO_SIGNAL' && direction !== null)) {
+      throw new TypeError('Направление не соответствует статусу решения');
+    }
+    if (!/^[a-z0-9_:-]{1,128}$/i.test(reason)) throw new TypeError('Некорректная причина решения');
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(algorithmVersion)) throw new TypeError('Некорректная версия алгоритма');
+    if (!decision.paramsSnapshot || typeof decision.paramsSnapshot !== 'object' || Array.isArray(decision.paramsSnapshot)) throw new TypeError('Нужен snapshot параметров решения');
+    if (!Array.isArray(decision.matches) || decision.matches.length > 100) throw new TypeError('matches должен быть массивом до 100 записей');
+    if (!decision.votes || typeof decision.votes !== 'object' || Array.isArray(decision.votes)) throw new TypeError('votes должен быть объектом');
+    const votes = { UP: Number(decision.votes.UP), DOWN: Number(decision.votes.DOWN) };
+    if (!Object.values(votes).every(value => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Некорректные голоса направления');
+    const averageSimilarity = decision.averageSimilarity == null ? null : Number(decision.averageSimilarity);
+    if (averageSimilarity != null && (!Number.isFinite(averageSimilarity) || averageSimilarity < 0 || averageSimilarity > 100)) throw new TypeError('Некорректное среднее сходство');
+    if (!Array.isArray(decision.queryCandles) || decision.queryCandles.length > 300) throw new TypeError('queryCandles должен быть массивом до 300 свечей');
+    const paramsJson = JSON.stringify(decision.paramsSnapshot);
+    const matchesJson = JSON.stringify(decision.matches);
+    const votesJson = JSON.stringify(votes);
+    const queryJson = JSON.stringify(decision.queryCandles);
+    if ([paramsJson, matchesJson, votesJson, queryJson].some(value => typeof value !== 'string') ||
+        paramsJson.length > 64_000 || matchesJson.length > 1_000_000 || queryJson.length > 2_000_000) {
+      throw new RangeError('Снимок решения превышает допустимый размер');
+    }
+    this._insertAnalysisDecision.run(
+      id, asset, timeframe, decisionAt, status, direction, reason, paramsJson, matchesJson,
+      votesJson, averageSimilarity, queryJson, algorithmVersion, now
+    );
+    return this.getAnalysisDecision(id);
+  }
+
+  getAnalysisDecision(id) {
+    this._assertOpen();
+    const row = this.db.prepare('SELECT * FROM analysis_decisions WHERE id=?').get(String(id));
+    return row ? this._mapAnalysisDecision(row) : null;
+  }
+
+  listAnalysisDecisions(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 100 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new RangeError('limit должен быть от 1 до 1000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).trim().toUpperCase();
+    const status = options.status == null ? null : String(options.status).toUpperCase();
+    const fromAt = options.fromAt == null ? null : Number(options.fromAt);
+    const toAt = options.toAt == null ? null : Number(options.toAt);
+    if (asset && !asset.endsWith('_OTC')) throw new TypeError('Фильтр допускает только OTC-активы');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (status && !['SIGNAL', 'NO_SIGNAL'].includes(status)) throw new TypeError('Некорректный статус фильтра');
+    if (fromAt != null && (!Number.isSafeInteger(fromAt) || fromAt <= 0)) throw new TypeError('Некорректная начальная дата');
+    if (toAt != null && (!Number.isSafeInteger(toAt) || toAt <= 0)) throw new TypeError('Некорректная конечная дата');
+    if (fromAt != null && toAt != null && fromAt > toAt) throw new TypeError('Начальная дата позже конечной');
+    const rows = this.db.prepare(`
+      SELECT * FROM analysis_decisions
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+        AND (? IS NULL OR status=?) AND (? IS NULL OR decision_at>=?)
+        AND (? IS NULL OR decision_at<=?)
+      ORDER BY decision_at DESC, id LIMIT ?
+    `).all(asset, asset, timeframe, timeframe, status, status, fromAt, fromAt, toAt, toAt, limit);
+    return rows.map(row => this._mapAnalysisDecision(row));
+  }
+
   getStats() {
     this._assertOpen();
     return {
@@ -388,6 +506,7 @@ class MarketDataStore {
       catalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog').get().count),
       otcCatalogEntries: Number(this.db.prepare('SELECT COUNT(*) AS count FROM asset_catalog WHERE is_otc=1').get().count),
       manualExamples: Number(this.db.prepare('SELECT COUNT(*) AS count FROM manual_examples').get().count),
+      analysisDecisions: Number(this.db.prepare('SELECT COUNT(*) AS count FROM analysis_decisions').get().count),
       schemaVersion: SCHEMA_VERSION
     };
   }
