@@ -1,44 +1,30 @@
 # Тестирование и подтверждение
 
-## Срез на 2026-11-19
+## Текущий срез рабочей ветки
+Работа находится в draft PR: https://github.com/Maestro-777/pocket-option-app/pull/2
 
-### Проверено чтением исходников GitHub
-- [x] README и package.json основного репозитория.
-- [x] main.js (файл получен; отдельные IPC и lifecycle требуют полного прохода для соответствующих задач).
-- [x] preload.js, site-preload.js, site-bridge.js.
-- [x] renderer/app.js (получен; полный проход потребуется для UI-задач).
-- [x] modules/manager.js и modules/README.md.
-- [x] Developer Guide и User Guide.
-- [x] pocket-tracker 3.6.0_0/manifest.json и ARCHITECTURE.md.
+### Автоматизированные проверки
+- В репозитории добавлены node:test suites для свечного агрегатора, pattern engine, example store, market data parser, WebSocket bridge, trading gate, decision journal и snapshot store.
+- CI workflow дополнен шагом `npm test` перед Windows installer build.
+- Текущий GitHub Actions run для последнего commit необходимо дождаться; до conclusion нельзя указывать тесты/сборку как прошедшие.
+- Локально в изолированном тестовом каталоге ранее прошли 20 тестов для первоначальной версии модулей. Это не заменяет запуск актуального набора тестов из ветки.
 
-### Подтверждено
-Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса, модульный менеджер и описанный механизм WebSocket/DOM расширения.
+### Проверено чтением исходников
+- [x] Основной README и package.json.
+- [x] Electron main/preload/site-preload/site-bridge и renderer.
+- [x] modules/manager.js.
+- [x] pocket-tracker 3.6.0_0 inject.js и ARCHITECTURE.md: обработчики WebSocket, updateAssets/updateStream, история и текущий DOM execution flow.
 
-### Не запускалось или не подтверждено
-- [ ] npm install.
-- [ ] npm run check локально.
-- [ ] npm start.
-- [ ] npm run pack / npm run dist.
-- [ ] запуск на Windows 11 x64.
-- [ ] интеграция с текущим Pocket Option.
-- [ ] end-to-end рыночные данные.
-- [ ] DEMO сделки.
-- [ ] REAL сделки.
+### Не подтверждено runtime
+- [ ] CDP debugger attach и injection на реальной странице Pocket Option.
+- [ ] Реальное получение updateAssets/updateStream в Electron.
+- [ ] Одновременные тики нескольких OTC-пар.
+- [ ] Получение/разбор исторических OHLC событий для всех десяти таймфреймов.
+- [ ] Сохранение/восстановление большого snapshot на Windows.
+- [ ] UI разметки на длинных историях и разных разрешениях.
+- [ ] npm start и полный smoke test Windows x64.
+- [ ] DEMO торговля — торговый исполнитель ещё не реализован.
+- [ ] REAL торговля — не реализована и не запускалась.
 
-Нельзя считать пункт проверенным только потому, что он описан в документации или CI.
-
-## Протокол будущих проверок
-Для каждой задачи записывать среду, команду/сценарий, результат, проверенные ограничения и непроверенные пункты.
-
-Минимум:
-1. Синтаксическая проверка изменённых JS.
-2. Unit tests алгоритмов и валидаторов.
-3. Тесты схемы и миграций хранилища.
-4. IPC tests для sender, типов и диапазонов payload.
-5. Market Data tests на обезличенных fixtures.
-6. Тесты отсутствия look-ahead leakage.
-7. Пауза: анализ продолжает работать, новые сделки блокируются.
-8. Идемпотентность сигналов и лимит одновременных сделок.
-9. DEMO end-to-end до рассмотрения REAL.
-
-Тесты реальной торговли не запускать без отдельного согласования.
+## Протокол проверок
+Для каждого изменения фиксировать среду, точную команду/сценарий, результат и непроверенные пункты. Не считать тест пройденным только по наличию тестового файла.
