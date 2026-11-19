@@ -50,7 +50,7 @@ class TradeExecutionAdapter{
   }catch(error){
    await this.gate.cancelReservation(reservation.reservation.reservationId,'page_command_failed');if(this.ledger)await this.ledger.markRejected(tradeId,'page_command_failed').catch(()=>{});
    return this._reject(signal,'page_command_failed',{message:String(error&&error.message||error)});
-  }finally{this.inFlight=null;}
+  }finally{this.inFlight=null;try{await win.webContents.executeJavaScript('window.__PT_CLEAR_TRADE_COMMAND__ && window.__PT_CLEAR_TRADE_COMMAND__('+JSON.stringify(tradeId)+')',true);}catch(_){}}
   if(!result||result.ok!==true||result.submitted!==true){
    await this.gate.cancelReservation(reservation.reservation.reservationId,result&&result.reason||'page_rejected');if(this.ledger)await this.ledger.markRejected(tradeId,result&&result.reason||'page_rejected').catch(()=>{});
    return this._reject(signal,result&&result.reason||'page_rejected',{pageResult:result||null});
