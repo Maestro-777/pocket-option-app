@@ -67,10 +67,13 @@ README и руководства прямо указывают, что теку�
 - Разрешённые события: `updateAssets`, `updateStream`, `quotes/stream`, `updateHistoryNewFast`, `updateHistoryNew`, `loadHistoryPeriod`, `loadHistoryPeriodFast`, `history/list/v2`.
 - События пакетируются и проходят через `window.postMessage` → `site-preload.js` → IPC `site:market-batch` → `MarketDataStore` в main process.
 - `core/market-data.js` нормализует имена активов, секундные/миллисекундные timestamps, тики и OHLC-историю; хранит ограниченные буферы отдельно по активам и периодам.
-- Main process проверяет отправителя, allow-list событий, размер и частоту IPC batch. Сообщения MAIN world остаются недоверенными данными; они не являются источником команд.
+- Main process проверяет отправителя, allow-list событий, размер и частоту IPC batch через core/ipc-validation.js. Тот же модуль проверяет свежесть/частоту balance payload и HTTPS origin allow-list. Сообщения MAIN world остаются недоверенными данными; они не являются источником команд.
 
 Ограничения прототипа:
 - Буферы пока находятся только в памяти и теряются при перезапуске.
 - Каталог активов и факт наличия нескольких тик-потоков не доказывают доступность полной истории или исполнение по неактивной паре.
 - Инжектор и межконтекстный мост ещё не проверены на реальной сессии Pocket Option в Electron 45 / Windows.
 - Не подключены анализ, Decision Engine и торговое исполнение.
+
+
+Дополнительно: core/ipc-validation.js содержит чистые валидаторы origin, баланса и batch payload; они покрыты node:test. Это unit-level проверка контракта, не полноценный тест Electron sender/webContents.
