@@ -447,7 +447,7 @@ ipcMain.handle('app:analysis:get-recent', event => {
 });
 ipcMain.handle('app:trading:get-state', event => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
-  return { ok: true, enabled: settings.autoTradingEnabled === true, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null, account: { selected: selectedAccount, detected: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }, stats: tradeLedger.getStats(), openTrades: tradeLedger.listOpen() };
+  return { ok: true, enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, config: { baseBet: settings.baseBet, defaultExpirySeconds: settings.defaultExpirySeconds }, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null, account: { selected: selectedAccount, detected: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }, stats: tradeLedger.getStats(), openTrades: tradeLedger.listOpen() };
 });
 ipcMain.handle('app:trading:set-enabled', (event, enabled) => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
