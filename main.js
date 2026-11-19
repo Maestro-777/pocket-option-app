@@ -481,6 +481,15 @@ ipcMain.handle('app:trading:set-config', (event, config = {}) => {
   settings.baseBet = baseBet; settings.defaultExpirySeconds = expiry; saveSettings();
   return { ok: true, baseBet, defaultExpirySeconds: expiry };
 });
+ipcMain.handle('app:trading:resolve', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.tradeId !== 'string') return { ok: false, reason: 'invalid_request' };
+  const trade = tradeLedger.listOpen().find(x => x.tradeId === request.tradeId);
+  if (!trade || trade.status !== 'UNKNOWN_AFTER_RESTART') return { ok: false, reason: 'trade_not_recoverable_or_not_unknown' };
+  try { return await tradeExecutionAdapter.resolveUnknown(request.tradeId, request.action, request.profit); }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+
 
 
 ipcMain.on('site:balance', (event, payload) => {
