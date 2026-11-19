@@ -50,7 +50,8 @@ function renderStatus(status) {
     : capture.status === 'unavailable' ? 'Недоступен (debugger занят)'
     : capture.status === 'error' || capture.status === 'detached' ? 'Ошибка захвата'
     : status.site.running ? 'Подключение…' : 'Не запущен';
-  $('market-detail').textContent = (health.assets || 0) + ' активов · ' + (health.candlesInMemory || 0) + ' свечей · ' + (health.acceptedTicks || 0) + ' тиков';
+  const catalog = capture.catalog || {};
+  $('market-detail').textContent = (health.assets || 0) + ' OTC активов · ' + (catalog.otc || 0) + ' в каталоге · ' + (health.candlesInMemory || 0) + ' свечей';
   $('connection-pill').textContent = status.site.running ? (status.account.stale ? 'Ожидание данных' : 'Подключено') : 'Нет данных';
   $('network-pill').textContent = 'Сеть: ' + (status.network.online === null ? 'проверка' : status.network.online ? 'доступна' : 'нет связи');
   $('side-status').textContent = status.site.running ? (status.account.stale ? 'Нет свежих данных' : 'Pocket Option подключён') : 'Сайт не запущен';
