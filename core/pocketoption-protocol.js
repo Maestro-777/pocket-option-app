@@ -170,7 +170,7 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
     const timeframeRaw = normalizeTimeframe(deal.timeframe ?? deal.period ?? deal.interval);
     const directionRaw = String(deal.direction ?? deal.action ?? deal.type ?? '').toUpperCase();
     const accountRaw = String(deal.accountMode ?? deal.account_type ?? payload?.accountMode ?? '').toUpperCase();
-    results.push({
+    const normalized = {
       brokerTradeId: brokerTradeId == null ? null : String(brokerTradeId),
       asset: typeof assetRaw === 'string' ? assetRaw : null,
       timeframe: timeframeRaw,
@@ -184,7 +184,15 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
       payoutRate: finiteNumber(deal.percentProfit ?? deal.payout ?? deal.payoutRate),
       balanceAfter: balanceValue,
       sourceEvent: eventName
-    });
+    };
+    const identity = normalized.brokerTradeId
+      ? 'broker:' + normalized.brokerTradeId
+      : 'event:' + crypto.createHash('sha256').update(JSON.stringify([
+          normalized.asset, normalized.timeframe, normalized.direction, normalized.accountMode,
+          normalized.amount, normalized.profit, normalized.result, normalized.entryAt,
+          normalized.expirySeconds, normalized.closedAt
+        ])).digest('hex');
+    results.push({ ...normalized, eventKey: identity });
   }
   return results;
 }
