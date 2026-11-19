@@ -58,3 +58,7 @@ textarea{resize:vertical}
 .analysis-match-head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-weight:650}
 .analysis-match-meta{color:#91a0b8;margin-top:4px}
 .analysis-score{font-variant-numeric:tabular-nums;color:#c7d8f2}
+
+.analysis-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
+.analysis-options label{font-size:11px}
+.analysis-options input{width:100%;padding:7px 8px}
