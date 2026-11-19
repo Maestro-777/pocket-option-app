@@ -9,8 +9,8 @@ class DecisionJournal{
  async readRecent(limit=100000,maxBytes=20971520){
   if(!Number.isInteger(limit)||limit<1||limit>100000||!Number.isInteger(maxBytes)||maxBytes<1024||maxBytes>104857600)throw new RangeError('Недопустимый лимит чтения журнала');
   let handle;try{handle=await fs.open(this.filePath,'r');}catch(error){if(error.code==='ENOENT')return[];throw error;}
-  try{const stat=await handle.stat();if(!stat.size)return[];const length=Math.min(stat.size,maxBytes),start=stat.size-length,buffer=Buffer.alloc(length);await handle.read(buffer,0,length,start);let text=buffer.toString('utf8');if(start>0){const firstNewline=text.indexOf('\\n');if(firstNewline<0)return[];text=text.slice(firstNewline+1);}
-   const lines=text.split(/\\r?\\n/).filter(Boolean).slice(-limit),events=[];
+  try{const stat=await handle.stat();if(!stat.size)return[];const length=Math.min(stat.size,maxBytes),start=stat.size-length,buffer=Buffer.alloc(length);await handle.read(buffer,0,length,start);let text=buffer.toString('utf8');if(start>0){const firstNewline=text.indexOf('\n');if(firstNewline<0)return[];text=text.slice(firstNewline+1);}
+   const lines=text.split(/\r?\n/).filter(Boolean).slice(-limit),events=[];
    for(const line of lines){try{const event=JSON.parse(line);if(event&&typeof event==='object'&&typeof event.type==='string'&&event.payload&&typeof event.payload==='object')events.push(event);}catch(_){}}
    return events;
   }finally{await handle.close();}
