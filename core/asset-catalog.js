@@ -98,9 +98,9 @@ class AssetCatalog {
     const explicitOtc = direct.endsWith('_OTC');
     const base = direct.replace(/_OTC$/, '');
     const candidates = this._byBase.get(base);
+    if (!explicitOtc && candidates && candidates.size > 1) return { asset: null, isOTC: false, known: false, ambiguous: true };
     if (exact) return { ...exact, known: true, ambiguous: false };
     if (explicitOtc) return { asset: direct, rawSymbol: raw, label: raw, isOTC: true, known: false, ambiguous: false, source: 'explicit-otc-suffix' };
-    if (candidates && candidates.size > 1) return { asset: null, isOTC: false, known: false, ambiguous: true };
     if (candidates && candidates.size === 1) {
       const only = this._entries.get(candidates.values().next().value);
       return only ? { ...only, known: true, ambiguous: false } : null;
