@@ -66,3 +66,11 @@
 - [x] `npm run check`.
 - [x] `npm test`: 15 тестов, 15 passed, 0 failed.
 - [x] `npm run dist`: Windows NSIS x64 installer и blockmap собраны.
+
+
+## IPC validators — 2026-11-20
+- [x] Unit-тесты HTTPS Pocket Option host allow-list.
+- [x] Проверки balance payload: account type, finite nonnegative balance, timestamp freshness/future bound, monotonic timestamp, rate limit, currency length.
+- [x] Проверки market batch: allow-list event names, maximum item count, total/per-event payload size, timestamp clamping.
+- [x] Локальный прогон ipc-validation.test.js: 5 passed, 0 failed.
+- [ ] Electron integration test для фактического sender/webContents/frame binding.
