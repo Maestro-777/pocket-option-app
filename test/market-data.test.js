@@ -31,3 +31,5 @@ test('enforces a global tick memory ceiling across assets',()=>{
  service.ingestTicks([['EURUSD_OTC',now,1],['GBPUSD_OTC',now+1,2],['USDJPY_OTC',now+2,3],['AUDUSD_OTC',now+3,4]]);
  assert.equal(service.getStatus().tickCount,3);
 });
+
+test('retains raw platform symbol identifiers for later asset switching',()=>{const service=new MarketDataService();service.ingestAssets([{symbol:'EURUSD_otc',name:'EUR/USD OTC'}]);const asset=service.listAssets({otcOnly:true})[0];assert.equal(asset.symbol,'EURUSD_OTC');assert.equal(asset.rawSymbol,'EURUSD_otc');});
