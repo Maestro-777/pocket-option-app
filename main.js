@@ -260,8 +260,10 @@ function attachMarketDataCapture(win) {
     onTradeResult: result => {
       if (!marketDataStore) throw new Error('SQLite журнал сделок недоступен');
       const resolved = result.asset ? assetCatalog.resolve(result.asset) : null;
-      const accountMode = result.accountMode === 'UNKNOWN' && ['DEMO', 'REAL'].includes(selectedAccount)
-        ? selectedAccount : result.accountMode;
+      const balanceFresh = lastBalance && Date.now() - Number(lastBalance.ts) <= 60_000;
+      const balanceAccount = balanceFresh ? String(lastBalance.accountType || '').toUpperCase() : 'UNKNOWN';
+      const accountMode = result.accountMode === 'UNKNOWN' && ['DEMO', 'REAL'].includes(balanceAccount)
+        ? balanceAccount : result.accountMode;
       const saved = marketDataStore.recordTradeResult({
         ...result,
         asset: resolved?.isOTC ? resolved.asset : null,
