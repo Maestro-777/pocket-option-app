@@ -737,6 +737,7 @@ else app.whenReady().then(async () => {
   tradeExecutionAdapter.restore(tradeLedger.listOpen());
   signalScheduler = new SignalScheduler({
     marketData: marketDataService, exampleStore, journal: decisionJournal, stateStore: scanStateStore,
+    getOpenTradeCount: () => { const gateState = tradingGate.getState(); return gateState.openTrades + gateState.pendingReservations; },
     getConfig: () => settings.analysisConfig || {},
     onDecision: item => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item);
