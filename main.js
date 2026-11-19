@@ -370,7 +370,6 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (healthTimer) clearInterval(healthTimer);
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
-  marketPersistenceTimer = setInterval(persistMarketDataSafely, 1000);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   if (settings.showMiniWidget) createMiniWindow().show();
   else if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
@@ -641,6 +640,7 @@ else app.whenReady().then(async () => {
   await moduleManager.loadAll();
   if (settings.showMiniWidget) createMiniWindow().show();
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
+  marketPersistenceTimer = setInterval(persistMarketDataSafely, 1000);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
