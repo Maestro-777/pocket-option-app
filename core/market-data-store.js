@@ -585,6 +585,136 @@ class MarketDataStore {
     return rows.map(row => this._mapAnalysisDecision(row));
   }
 
+  recordTradeResult(input, now = Date.now()) {
+    this._assertOpen();
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Результат сделки должен быть объектом');
+    const createdAt = Number(now);
+    if (!Number.isSafeInteger(createdAt) || createdAt <= 0) throw new TypeError('Некорректное время записи результата');
+    const brokerTradeId = input.brokerTradeId == null || input.brokerTradeId === '' ? null : String(input.brokerTradeId).trim();
+    if (brokerTradeId && brokerTradeId.length > 128) throw new TypeError('brokerTradeId слишком длинный');
+    const asset = input.asset == null || input.asset === '' ? null : String(input.asset).trim().toUpperCase();
+    if (asset && (asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset))) throw new TypeError('Некорректный актив результата сделки');
+    const timeframe = input.timeframe == null || input.timeframe === '' ? null : String(input.timeframe).toUpperCase();
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм результата сделки');
+    const direction = input.direction == null || input.direction === '' ? null : String(input.direction).toUpperCase();
+    if (direction && !['UP', 'DOWN'].includes(direction)) throw new TypeError('Некорректное направление результата сделки');
+    const accountMode = String(input.accountMode || 'UNKNOWN').toUpperCase();
+    if (!['DEMO', 'REAL', 'UNKNOWN'].includes(accountMode)) throw new TypeError('Некорректный режим счёта');
+    const amount = Number(input.amount), profit = Number(input.profit);
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(profit)) throw new TypeError('Некорректная сумма или P/L сделки');
+    const result = String(input.result || '').toUpperCase();
+    if (!['WIN', 'LOSS', 'DRAW'].includes(result)) throw new TypeError('Некорректный исход сделки');
+    const closedAt = Number(input.closedAt);
+    if (!Number.isSafeInteger(closedAt) || closedAt <= 0) throw new TypeError('Некорректное время закрытия сделки');
+    const entryAt = input.entryAt == null ? null : Number(input.entryAt);
+    if (entryAt != null && (!Number.isSafeInteger(entryAt) || entryAt <= 0 || entryAt > closedAt)) throw new TypeError('Некорректное время открытия сделки');
+    const expiryValue = input.expirySeconds == null ? null : Number(input.expirySeconds);
+    const expirySeconds = expiryValue == null ? null : Math.round(expiryValue);
+    if (expirySeconds != null && (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400)) throw new TypeError('Некорректная экспирация сделки');
+    const payoutRate = input.payoutRate == null ? null : Number(input.payoutRate);
+    if (payoutRate != null && (!Number.isFinite(payoutRate) || payoutRate < 0 || payoutRate > 1000)) throw new TypeError('Некорректный payout');
+    const balanceAfter = input.balanceAfter == null ? null : Number(input.balanceAfter);
+    if (balanceAfter != null && (!Number.isFinite(balanceAfter) || balanceAfter < 0)) throw new TypeError('Некорректный баланс после сделки');
+    const sourceEvent = String(input.sourceEvent || 'unknown');
+    if (!sourceEvent || sourceEvent.length > 64) throw new TypeError('Некорректное имя события результата');
+    const identity = brokerTradeId ? 'broker:' + brokerTradeId : [
+      asset || '', timeframe || '', direction || '', accountMode, amount, profit, result,
+      entryAt || '', expirySeconds || '', closedAt
+    ].join('|');
+    const eventKey = String(input.eventKey || crypto.createHash('sha256').update(identity).digest('hex'));
+    if (!eventKey || eventKey.length > 256) throw new TypeError('Некорректный ключ события сделки');
+    const id = crypto.randomUUID();
+    const inserted = Number(this._insertTradeResult.run(
+      id, eventKey, brokerTradeId, asset, timeframe, direction, accountMode, amount, profit, result,
+      entryAt, closedAt, expirySeconds, payoutRate, balanceAfter, sourceEvent, createdAt
+    ).changes || 0) > 0;
+    const row = this.db.prepare('SELECT * FROM trade_results WHERE event_key=? OR (? IS NOT NULL AND broker_trade_id=?) ORDER BY created_at DESC LIMIT 1')
+      .get(eventKey, brokerTradeId, brokerTradeId);
+    return { inserted, duplicate: !inserted, record: row ? this._mapTradeResult(row) : null };
+  }
+
+  _mapTradeResult(row) {
+    return {
+      id: row.id, eventKey: row.event_key, brokerTradeId: row.broker_trade_id,
+      asset: row.asset, timeframe: row.timeframe, direction: row.direction,
+      accountMode: row.account_mode, amount: Number(row.amount), profit: Number(row.profit),
+      result: row.result, entryAt: row.entry_at == null ? null : Number(row.entry_at),
+      closedAt: Number(row.closed_at), expirySeconds: row.expiry_seconds == null ? null : Number(row.expiry_seconds),
+      payoutRate: row.payout_rate == null ? null : Number(row.payout_rate),
+      balanceAfter: row.balance_after == null ? null : Number(row.balance_after),
+      sourceEvent: row.source_event, createdAt: Number(row.created_at)
+    };
+  }
+
+  listTradeResults(options = {}) {
+    this._assertOpen();
+    const limit = options.limit == null ? 100 : Number(options.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100_000) throw new RangeError('limit должен быть от 1 до 100000');
+    const asset = options.asset == null ? null : String(options.asset).trim().toUpperCase();
+    const timeframe = options.timeframe == null ? null : String(options.timeframe).toUpperCase();
+    const direction = options.direction == null ? null : String(options.direction).toUpperCase();
+    const accountMode = options.accountMode == null ? null : String(options.accountMode).toUpperCase();
+    const result = options.result == null ? null : String(options.result).toUpperCase();
+    if (asset && (asset.length > 64 || !/^[A-Z0-9._-]+$/.test(asset))) throw new TypeError('Некорректный актив');
+    if (timeframe && !VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+    if (direction && !['UP', 'DOWN'].includes(direction)) throw new TypeError('Некорректное направление');
+    if (accountMode && !['DEMO', 'REAL', 'UNKNOWN'].includes(accountMode)) throw new TypeError('Некорректный режим счёта');
+    if (result && !['WIN', 'LOSS', 'DRAW'].includes(result)) throw new TypeError('Некорректный исход');
+    const fromAt = options.fromAt == null ? null : Number(options.fromAt);
+    const toAt = options.toAt == null ? null : Number(options.toAt);
+    if (fromAt != null && (!Number.isSafeInteger(fromAt) || fromAt <= 0)) throw new TypeError('Некорректная начальная дата');
+    if (toAt != null && (!Number.isSafeInteger(toAt) || toAt <= 0)) throw new TypeError('Некорректная конечная дата');
+    if (fromAt != null && toAt != null && fromAt > toAt) throw new TypeError('Начальная дата позже конечной');
+    const rows = this.db.prepare(`
+      SELECT * FROM trade_results
+      WHERE (? IS NULL OR asset=?) AND (? IS NULL OR timeframe=?)
+        AND (? IS NULL OR direction=?) AND (? IS NULL OR account_mode=?)
+        AND (? IS NULL OR result=?) AND (? IS NULL OR closed_at>=?)
+        AND (? IS NULL OR closed_at<=?)
+      ORDER BY closed_at DESC, created_at DESC LIMIT ?
+    `).all(asset, asset, timeframe, timeframe, direction, direction, accountMode, accountMode,
+      result, result, fromAt, fromAt, toAt, toAt, limit);
+    return rows.map(row => this._mapTradeResult(row));
+  }
+
+  getTradeStatistics(options = {}) {
+    const records = this.listTradeResults({ ...options, limit: options.limit ?? 100_000 });
+    const summarize = items => {
+      const wins = items.filter(item => item.result === 'WIN').length;
+      const losses = items.filter(item => item.result === 'LOSS').length;
+      const draws = items.filter(item => item.result === 'DRAW').length;
+      const grossProfit = items.reduce((sum, item) => sum + Math.max(0, item.profit), 0);
+      const grossLoss = items.reduce((sum, item) => sum + Math.min(0, item.profit), 0);
+      const netProfit = grossProfit + grossLoss;
+      const resolved = wins + losses;
+      return {
+        total: items.length, wins, losses, draws,
+        winRate: resolved ? wins / resolved * 100 : null,
+        grossProfit, grossLoss, netProfit,
+        averageProfit: items.length ? netProfit / items.length : 0,
+        totalStake: items.reduce((sum, item) => sum + item.amount, 0)
+      };
+    };
+    const groupBy = selector => {
+      const groups = new Map();
+      for (const item of records) {
+        const key = selector(item);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(item);
+      }
+      return [...groups.entries()].map(([key, items]) => ({ key, ...summarize(items) }))
+        .sort((a, b) => b.netProfit - a.netProfit || b.total - a.total || String(a.key).localeCompare(String(b.key)));
+    };
+    return {
+      generatedAt: Date.now(), overall: summarize(records),
+      byAsset: groupBy(item => item.asset || 'UNKNOWN'),
+      byTimeframe: groupBy(item => item.timeframe || 'UNKNOWN'),
+      byDirection: groupBy(item => item.direction || 'UNKNOWN'),
+      byAccountMode: groupBy(item => item.accountMode),
+      byExpiry: groupBy(item => item.expirySeconds == null ? 'UNKNOWN' : String(item.expirySeconds))
+    };
+  }
+
   getStats() {
     this._assertOpen();
     return {
