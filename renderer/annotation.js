@@ -37,7 +37,8 @@
     $('trading-state').textContent = 'Обнаруженный счёт: ' + (account.detected || 'не определён') +
       ' · выбранный режим: ' + (account.selected || '—') + ' · баланс: ' + (account.balance == null ? '—' : account.balance) +
       ' · активных/неподтверждённых сделок: ' + result.gate.openTrades +
-      (result.ledgerHealthy ? '' : ' · ОШИБКА ЖУРНАЛА СДЕЛОК: автоторговля заблокирована');
+      (result.ledgerHealthy ? '' : ' · ОШИБКА ЖУРНАЛА СДЕЛОК: автоторговля заблокирована') +
+      (result.execution && result.execution.correlationVerified ? ' · корреляция результатов по парам подтверждена' : ' · несколько одновременных сделок заблокированы до подтверждения корреляции результатов');
     const stats = result.stats || {};
     $('trading-stats').innerHTML = '<span>Закрыто: ' + Number(stats.total || 0) + '</span><span>WIN: ' + Number(stats.wins || 0) +
       '</span><span>LOSS: ' + Number(stats.losses || 0) + '</span><span>DRAW: ' + Number(stats.draws || 0) +
