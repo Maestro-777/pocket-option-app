@@ -596,49 +596,6 @@ async function loadDecisionJournal() {
   }
 }
 
-async function loadRankedSignals() {
-  try {
-    const status = await api.getStatus();
-    const signals = status?.marketData?.scanner?.rankedSignals || [];
-    const list = $('ranked-signals');
-    if (!list) return;
-    list.replaceChildren();
-    $('ranked-count').textContent = String(signals.length);
-    if (!signals.length) {
-      const empty = document.createElement('p');
-      empty.className = 'empty';
-      empty.textContent = 'Нет актуальных сигналов. Новые появятся после закрытия очередной свечи.';
-      list.append(empty);
-      return;
-    }
-    for (const signal of signals) {
-      const row = document.createElement('article');
-      row.className = 'example-card';
-      const head = document.createElement('div');
-      head.className = 'example-head';
-      const title = document.createElement('span');
-      title.className = 'example-title';
-      title.textContent = '#' + signal.rank + ' · ' + signal.asset + ' · ' + signal.timeframe;
-      const direction = document.createElement('b');
-      direction.className = signal.direction === 'UP' ? 'direction-up' : 'direction-down';
-      direction.textContent = signal.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ';
-      head.append(title, direction);
-      const meta = document.createElement('div');
-      meta.className = 'example-meta';
-      const ranking = signal.ranking || {};
-      meta.textContent = 'Сходство ' + Number(ranking.similarity ?? signal.averageSimilarity).toFixed(2) +
-        '% · Голоса ' + ranking.directionalVotes + ' · Согласованность ' +
-        (Number(ranking.directionalConsistency || 0) * 100).toFixed(1) + '% · Историческая win rate ' +
-        (ranking.historicalWinRate < 0 ? 'нет данных' : Number(ranking.historicalWinRate).toFixed(1) + '%');
-      row.append(head, meta);
-      list.append(row);
-    }
-  } catch (error) {
-    const list = $('ranked-signals');
-    if (list) list.textContent = error.message;
-  }
-}
-
 async function reloadAll() {
   await loadAnalysisSettings();
   await loadAssets();
@@ -687,5 +644,3 @@ reloadAll().catch(error => setStatus(error.message, true));
 setInterval(loadDecisionJournal, 5000);
 loadLiveSignals();
 setInterval(loadLiveSignals, 3000);
-setInterval(loadRankedSignals, 1500);
-loadRankedSignals();
