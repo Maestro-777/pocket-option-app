@@ -11,6 +11,7 @@ const { MarketDataService, normalizeAsset } = require('./core/market-data');
 const { ExampleStore } = require('./core/example-store');
 const { DecisionJournal } = require('./core/decision-journal');
 const { MarketDataStore } = require('./core/market-data-store');
+const { SignalScheduler, normalizeSchedulerConfig } = require('./core/signal-scheduler');
 const { analyzeSituation } = require('./core/matcher');
 
 const APP_NAME = 'Pocket Option Background';
@@ -47,6 +48,7 @@ let marketDataPublishTimer = null;
 let marketDataSaveTimer = null;
 let shutdownInProgress = false;
 let allowQuit = false;
+let signalScheduler = null;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -226,7 +228,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus()
+    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null
   };
 }
 function publishStatus() {
@@ -266,7 +268,6 @@ ipcMain.handle('app:settings:save', (_event, next) => {
   if (fullCheckTimer) clearInterval(fullCheckTimer);
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
-  marketDataSaveTimer = setInterval(() => marketDataStore.save().catch(error => log('error', 'Периодическое сохранение рыночных данных не удалось', String(error))), 60_000);
   if (settings.showMiniWidget) createMiniWindow().show();
   else if (miniWindow && !miniWindow.isDestroyed()) miniWindow.hide();
   log('info', 'Настройки сохранены', settings); return settings;
@@ -400,6 +401,32 @@ ipcMain.handle('app:matcher:analyze', async (event, request = {}) => {
     return { ok: true, decision, journalId: journal.id };
   } catch (error) { return { ok: false, reason: String(error.message || error) }; }
 });
+ipcMain.handle('app:analysis:get-config', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, config: normalizeSchedulerConfig(settings.analysisConfig || {}) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:set-config', (event, next = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    const config = normalizeSchedulerConfig(next);
+    settings.analysisConfig = {
+      enabled: config.enabled, timeframes: config.timeframes.slice(), lookback: config.lookback,
+      maxOpenTrades: config.maxOpenTrades, scanIntervalMs: config.scanIntervalMs,
+      matcher: { ...config.matcher }
+    };
+    saveSettings();
+    if (signalScheduler) { signalScheduler.stop(); signalScheduler.start(); }
+    publishStatus();
+    return { ok: true, config };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:scan-now', async event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, result: signalScheduler ? await signalScheduler.scan() : null }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
   if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
@@ -544,6 +571,8 @@ async function runFullCheck(source) {
     for (const item of moduleChecks) checks.push(item);
   }
   checks.push({ name: 'Торговое ядро', ok: true, state: 'not-connected', detail: 'Не подключено в этой сборке: приложение не содержит модуль автоторговли и не совершает сделки' });
+  checks.push({ name: 'Непрерывный анализ OTC', ok: !!(signalScheduler && signalScheduler.getStatus().running), detail: signalScheduler ? JSON.stringify(signalScheduler.getStatus()) : 'Не запущен' });
+  checks.push({ name: 'Рыночные данные', ok: true, state: marketDataService.getStatus().connected ? 'connected' : 'waiting', detail: JSON.stringify(marketDataService.getStatus()) });
   const result = { at: new Date().toISOString(), source, passed: checks.every(c => c.ok !== false), checks };
   log(result.passed ? 'info' : 'warn', 'Проверка устойчивости завершена', result);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:check-result', result);
@@ -556,6 +585,7 @@ app.on('before-quit', event => {
   if (shutdownInProgress) return;
   shutdownInProgress = true; quitting = true;
   clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
+  if (signalScheduler) signalScheduler.stop();
   clearInterval(marketDataSaveTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
   log('info', 'Приложение завершает работу; сохраняем рыночные данные');
   const tasks = [marketDataStore.save().catch(error => log('error', 'Не удалось сохранить рыночные данные', String(error)))];
@@ -575,9 +605,17 @@ else app.whenReady().then(async () => {
   createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
+  signalScheduler = new SignalScheduler({
+    marketData: marketDataService, exampleStore, journal: decisionJournal,
+    getConfig: () => settings.analysisConfig || {},
+    onDecision: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item); },
+    onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
+  });
+  signalScheduler.start();
   if (settings.showMiniWidget) createMiniWindow().show();
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  marketDataSaveTimer = setInterval(() => marketDataStore.save().catch(error => log('error', 'Периодическое сохранение рыночных данных не удалось', String(error))), 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
   configureUpdateChecks();
