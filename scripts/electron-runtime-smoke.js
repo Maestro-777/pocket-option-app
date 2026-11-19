@@ -46,7 +46,27 @@ app.whenReady().then(async () => {
     await window.webContents.executeJavaScript('window.pocketApp.getMarketAssets()');
     await window.webContents.executeJavaScript('Promise.all([window.pocketApp.getTradeResults(), window.pocketApp.getTradeStatistics()])');
     window.destroy();
-    console.log('Electron SQLite and manual labeling renderer smoke tests passed');
+
+    let spoofedBalanceReceived = false;
+    ipcMain.on('site:balance', () => { spoofedBalanceReceived = true; });
+    const siteWindow = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, '..', 'site-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true
+      }
+    });
+    await siteWindow.loadURL('data:text/html,<html><body>isolated preload security smoke</body></html>');
+    await siteWindow.webContents.executeJavaScript(
+      "window.postMessage({type:'PT_PO_BALANCE',accountType:'real',balance:999999,ts:Date.now()}, '*')"
+    );
+    await new Promise(resolve => setTimeout(resolve, 150));
+    if (spoofedBalanceReceived) throw new Error('Page postMessage must not be able to forge privileged balance IPC');
+    siteWindow.destroy();
+
+    console.log('Electron SQLite, labeling renderer, and isolated site-preload security smoke tests passed');
     app.exit(0);
   } catch (error) {
     try { if (window && !window.isDestroyed()) window.destroy(); } catch (_) {}
