@@ -195,7 +195,7 @@ test('migrates schema version 1 to version 3 without losing market candles', () 
   try {
     const first = new MarketDataStore(file);
     first.upsertCandles([candle()]);
-    first.db.exec('DROP TABLE manual_examples; PRAGMA user_version = 1');
+    first.db.exec('DROP TABLE analysis_decisions; DROP TABLE manual_examples; PRAGMA user_version = 1');
     first.close();
     const upgraded = new MarketDataStore(file);
     assert.equal(upgraded.getStats().schemaVersion, 3);
