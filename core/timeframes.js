@@ -47,7 +47,7 @@ function aggregateTicksToCandles(ticks, timeframe, options = {}) {
 
   ticks.forEach((raw, index) => {
     const tick = normalizeTick(raw, index);
-    if (!tick) return;
+    if (!tick || tick.ts > asOf) return;
     const startAt = Math.floor(tick.ts / duration) * duration;
     const key = JSON.stringify([tick.asset, startAt]);
     let bucket = buckets.get(key);
