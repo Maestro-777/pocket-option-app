@@ -46,7 +46,7 @@
     const actualBalanceCurve = stats.balanceCurve || [];
     const curve = actualBalanceCurve.length ? actualBalanceCurve : (stats.curve || []);
     if (curve.length) {
-      const values = curve.map(x => Number(actualBalanceCurve.length ? x.balance : x.cumulative || 0)), low = Math.min(0, ...values), high = Math.max(0, ...values), span = Math.max(high-low, 0.000001);
+      const values = curve.map(x => Number(actualBalanceCurve.length ? x.balance : x.cumulative || 0)), low = actualBalanceCurve.length ? Math.min(...values) : Math.min(0, ...values), high = actualBalanceCurve.length ? Math.max(...values) : Math.max(0, ...values), span = Math.max(high-low, 0.000001);
       const points = values.map((v,i) => (curve.length === 1 ? 50 : i/(curve.length-1)*100).toFixed(2) + ',' + (29-(v-low)/span*26).toFixed(2)).join(' ');
       $('trading-curve').innerHTML = '<small>' + (actualBalanceCurve.length ? 'Баланс по подтверждённым снимкам сайта после закрытия' : 'Кривая накопленного результата по закрытым сделкам') + '</small><svg viewBox="0 0 100 32" preserveAspectRatio="none"><polyline points="' + points + '" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>';
     } else $('trading-curve').innerHTML = '<small>Кривая доходности появится после первых закрытых сделок</small>';
