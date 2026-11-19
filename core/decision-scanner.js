@@ -59,14 +59,20 @@ class DecisionScanner {
   }
 
   _analysisOptions(settings) {
-    return validateOptions({
-      topK: settings.similarityTopK ?? settings.topK,
-      minSimilarity: settings.similarityMinSimilarity ?? settings.minSimilarity,
-      minExamples: settings.similarityMinExamples ?? settings.minExamples,
-      minDirectionVotes: settings.similarityMinDirectionVotes ?? settings.minDirectionVotes,
-      lookback: settings.similarityLookback ?? settings.lookback,
-      maxExamples: settings.similarityMaxExamples ?? settings.maxExamples
-    });
+    const options = {};
+    const aliases = {
+      topK: ['similarityTopK', 'topK'],
+      minSimilarity: ['similarityMinSimilarity', 'minSimilarity'],
+      minExamples: ['similarityMinExamples', 'minExamples'],
+      minDirectionVotes: ['similarityMinDirectionVotes', 'minDirectionVotes'],
+      lookback: ['similarityLookback', 'lookback'],
+      maxExamples: ['similarityMaxExamples', 'maxExamples']
+    };
+    for (const [target, keys] of Object.entries(aliases)) {
+      const key = keys.find(name => settings[name] != null);
+      if (key) options[target] = settings[key];
+    }
+    return validateOptions(options);
   }
 
   _getExamples(timeframe, maxExamples) {
