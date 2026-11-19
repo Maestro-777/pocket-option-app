@@ -85,6 +85,29 @@ function log(level, message, data) {
 }
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch (_) {}
+  const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
+  const savedTimeframes = Array.isArray(settings.analysisTimeframes)
+    ? [...new Set(settings.analysisTimeframes.map(value => String(value).toUpperCase()).filter(value => allowed.includes(value)))]
+    : allowed;
+  settings.analysisTimeframes = savedTimeframes.length ? savedTimeframes : allowed;
+  try {
+    const config = validateOptions({
+      topK: settings.similarityTopK, minSimilarity: settings.similarityMinSimilarity,
+      minExamples: settings.similarityMinExamples, minDirectionVotes: settings.similarityMinDirectionVotes,
+      lookback: settings.similarityLookback
+    });
+    settings.similarityTopK = config.topK;
+    settings.similarityMinSimilarity = config.minSimilarity;
+    settings.similarityMinExamples = config.minExamples;
+    settings.similarityMinDirectionVotes = config.minDirectionVotes;
+    settings.similarityLookback = config.lookback;
+  } catch (_) {
+    settings.similarityTopK = 10;
+    settings.similarityMinSimilarity = 80;
+    settings.similarityMinExamples = 3;
+    settings.similarityMinDirectionVotes = 6;
+    settings.similarityLookback = 30;
+  }
 }
 function saveSettings() {
   fs.mkdirSync(userRoot(), { recursive: true });
