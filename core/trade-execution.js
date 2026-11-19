@@ -79,14 +79,14 @@ class TradeExecutionAdapter{
     if(this.ledger)await this.ledger.recordUnmatchedClose({...unmatched,reason:unmatched.reason}).catch(()=>{});try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}
     results.push(unmatched);continue;
    }
-   const trade=candidates[0],rawProfit=deal.profit??deal.netProfit,profit=Number(rawProfit);
-   if(rawProfit==null||!Number.isFinite(profit)){const unmatched={matched:false,reason:'missing_or_invalid_profit',tradeId:trade.tradeId,asset:asset||null,amount:Number.isFinite(amount)?amount:null,profit:null};if(this.ledger)await this.ledger.recordUnmatchedClose(unmatched).catch(()=>{});try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}results.push(unmatched);continue;}
-   const outcome=profit>0?'WIN':profit<0?'LOSS':'DRAW';
+   const trade=candidates[0],rawProfit=deal.profit??deal.netProfit,platformProfit=Number(rawProfit);
+   if(rawProfit==null||!Number.isFinite(platformProfit)){const unmatched={matched:false,reason:'missing_or_invalid_profit',tradeId:trade.tradeId,asset:asset||null,amount:Number.isFinite(amount)?amount:null,profit:null};if(this.ledger)await this.ledger.recordUnmatchedClose(unmatched).catch(()=>{});try{await this._journal('TRADE_CLOSED',unmatched,{});}catch(_){}results.push(unmatched);continue;}
+   const outcome=platformProfit>0?'WIN':'LOSS',profit=platformProfit>0?platformProfit:-trade.amount;
    if(asset)this.correlationVerified=true;
    const closed=await this.gate.closeTrade(trade.tradeId,{outcome});
    if(this.ledger)await this.ledger.closeTrade(trade.tradeId,{profit,outcome,closedAt:Date.now(),platformDealId:String(deal.id??deal.ticket??'')}).catch(error=>this.onUpdate({type:'ledger_error',tradeId:trade.tradeId,message:String(error.message||error)}));
    this.submitted.delete(trade.tradeId);
-   const record={matched:true,tradeId:trade.tradeId,platformDealId:String(deal.id??deal.ticket??''),pair:trade.pair,timeframe:trade.timeframe,direction:trade.direction,amount:trade.amount,profit,outcome,closedAt:Date.now(),accountMode:'DEMO'};
+   const record={matched:true,tradeId:trade.tradeId,platformDealId:String(deal.id??deal.ticket??''),pair:trade.pair,timeframe:trade.timeframe,direction:trade.direction,amount:trade.amount,platformProfit,profit,outcome,closedAt:Date.now(),accountMode:'DEMO'};
    try{await this._journal('TRADE_CLOSED',record,{expirySeconds:trade.expirySeconds});}catch(error){this.onUpdate({type:'journal_error',tradeId:trade.tradeId,message:String(error.message||error)});}
    this.onUpdate({type:'closed',trade:closed,result:record});results.push(record);
   }
