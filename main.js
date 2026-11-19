@@ -25,6 +25,7 @@ let quitting = false;
 let recoveryInProgress = false;
 let healthTimer = null;
 let fullCheckTimer = null;
+let updateCheckTimer = null;
 let appStartedAt = Date.now();
 let lastBalance = null;
 let lastSiteSignalAt = 0;
@@ -41,7 +42,7 @@ let settings = {
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: false
+  autoCheckUpdates: true
 };
 
 const userRoot = () => app.getPath('userData');
@@ -311,21 +312,44 @@ ipcMain.handle('app:logs:export', async () => {
   log('info', 'Журналы экспортированы', { filePath }); return { ok: true, filePath };
 });
 ipcMain.handle('app:update:check', async () => {
-  try { updateState = { status: 'checking', version: null, progress: 0, message: 'Проверяем обновления…' }; publishStatus(); await autoUpdater.checkForUpdates(); return { ok: true }; }
-  catch (error) { updateState = { status: 'error', message: String(error) }; log('error', 'Ошибка проверки обновлений', String(error)); publishStatus(); return { ok: false, reason: String(error) }; }
+  if (!app.isPackaged) return { ok: false, reason: 'Проверка обновлений доступна только в установленной сборке.' };
+  try {
+    updateState = { status: 'checking', version: null, progress: 0, message: 'Проверяем обновления…' };
+    publishStatus();
+    await autoUpdater.checkForUpdates();
+    return { ok: true };
+  } catch (error) {
+    updateState = { status: 'error', version: null, progress: 0, message: 'Не удалось проверить обновления' };
+    log('error', 'Ошибка проверки обновлений', String(error));
+    publishStatus();
+    return { ok: false, reason: String(error) };
+  }
 });
 ipcMain.handle('app:update:download', async () => {
+  if (!app.isPackaged) return { ok: false, reason: 'Загрузка обновлений доступна только в установленной сборке.' };
   try { await autoUpdater.downloadUpdate(); return { ok: true }; }
-  catch (error) { return { ok: false, reason: String(error) }; }
+  catch (error) {
+    log('error', 'Не удалось загрузить обновление', String(error));
+    return { ok: false, reason: String(error) };
+  }
 });
-ipcMain.handle('app:update:install', () => { autoUpdater.quitAndInstall(false, true); return { ok: true }; });
-autoUpdater.autoDownload = false;
-autoUpdater.on('checking-for-update', () => { updateState = { status: 'checking', message: 'Проверяем обновления…' }; publishStatus(); });
-autoUpdater.on('update-available', info => { updateState = { status: 'available', version: info.version, message: 'Доступна новая версия' }; log('info', 'Найдено обновление', { version: info.version }); publishStatus(); });
-autoUpdater.on('update-not-available', info => { updateState = { status: 'current', version: info.version, message: 'Установлена последняя версия' }; publishStatus(); });
-autoUpdater.on('download-progress', p => { updateState = { status: 'downloading', version: updateState.version, progress: Math.round(p.percent), message: 'Загрузка обновления' }; publishStatus(); });
-autoUpdater.on('update-downloaded', info => { updateState = { status: 'downloaded', version: info.version, progress: 100, message: 'Обновление готово к установке' }; log('info', 'Обновление загружено', { version: info.version }); publishStatus(); });
-autoUpdater.on('error', error => { updateState = { status: 'error', message: String(error) }; log('error', 'Updater error', String(error)); publishStatus(); });
+ipcMain.handle('app:update:install', () => {
+  if (updateState.status !== 'downloaded') return { ok: false, reason: 'Обновление ещё не загружено.' };
+  autoUpdater.quitAndInstall(false, true);
+  return { ok: true };
+});
+
+// Обновления скачиваются автоматически после обнаружения релиза.
+// Установка выполняется при нажатии пользователем или при следующем штатном выходе.
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.allowDowngrade = false;
+autoUpdater.on('checking-for-update', () => { updateState = { status: 'checking', version: null, progress: 0, message: 'Проверяем обновления…' }; publishStatus(); });
+autoUpdater.on('update-available', info => { updateState = { status: 'downloading', version: info.version, progress: 0, message: 'Найдено обновление. Начинается автоматическая загрузка…' }; log('info', 'Найдено обновление', { version: info.version }); publishStatus(); });
+autoUpdater.on('update-not-available', info => { updateState = { status: 'current', version: info.version, progress: 0, message: 'Установлена последняя версия' }; publishStatus(); });
+autoUpdater.on('download-progress', p => { updateState = { status: 'downloading', version: updateState.version, progress: Math.round(p.percent), message: 'Загрузка обновления: ' + Math.round(p.percent) + '%' }; publishStatus(); });
+autoUpdater.on('update-downloaded', info => { updateState = { status: 'downloaded', version: info.version, progress: 100, message: 'Версия ' + info.version + ' загружена. Нажмите «Установить и перезапустить» или закройте приложение для установки.' }; log('info', 'Обновление загружено', { version: info.version }); publishStatus(); });
+autoUpdater.on('error', error => { updateState = { status: 'error', version: updateState.version, progress: 0, message: 'Ошибка обновления: ' + String(error.message || error) }; log('error', 'Updater error', String(error)); publishStatus(); });
 
 async function checkNetwork() {
   lastNetworkCheckAt = Date.now();
@@ -392,7 +416,7 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
-  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer);
+  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
@@ -411,5 +435,11 @@ else app.whenReady().then(async () => {
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
-  if (settings.autoCheckUpdates) autoUpdater.checkForUpdates().catch(error => log('warn', 'Автопроверка обновлений недоступна', String(error)));
+  if (app.isPackaged && settings.autoCheckUpdates) {
+    // Даём окнам и IPC завершить запуск; затем проверяем обновления и повторяем раз в 6 часов.
+    setTimeout(() => autoUpdater.checkForUpdates().catch(error => log('warn', 'Автопроверка обновлений недоступна', String(error))), 12_000);
+    updateCheckTimer = setInterval(() => {
+      if (app.isPackaged) autoUpdater.checkForUpdates().catch(error => log('warn', 'Плановая проверка обновлений не удалась', String(error)));
+    }, 6 * 60 * 60_000);
+  }
 }).catch(error => { console.error(error); app.quit(); });
