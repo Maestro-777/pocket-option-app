@@ -317,7 +317,7 @@ function publishMarketDataStatus() {
 }
 ipcMain.on('site:market-data', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
-  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
+  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
   try {
     const result = marketDataService.ingestEvent(payload.eventName, payload.payload);
     if (result.accepted > 0) publishMarketDataStatus();
