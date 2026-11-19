@@ -76,3 +76,22 @@ test('parses provider OHLC history without borrowing the selected DOM symbol', (
   assert.equal(event.candles[0].low, 1.09);
   assert.equal(event.candles[0].close, 1.11);
 });
+
+test('stores provider OHLC candles separately from tick history', () => {
+  const store = new MarketDataStore();
+  const receivedAt = 1_700_000_120_000;
+  const result = store.ingest('history/list/v2', {
+    asset: 'EURUSD_otc', period: 60,
+    history: [
+      [1_700_000_000, 1.10, 1.12, 1.09, 1.11],
+      [1_700_000_060, 1.11, 1.13, 1.10, 1.12]
+    ]
+  }, receivedAt);
+  assert.equal(result.accepted, true);
+  const candles = store.getCandles('EURUSD_OTC', 60);
+  assert.equal(candles.length, 2);
+  assert.deepEqual(
+    [candles[0].open, candles[0].high, candles[0].low, candles[0].close],
+    [1.10, 1.12, 1.09, 1.11]
+  );
+});
