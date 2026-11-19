@@ -106,3 +106,15 @@ test('loads only recent OTC candles per series for recovery', () => {
   assert.deepEqual(recent.filter(row => row.asset === 'EURUSD_OTC').map(row => row.startAt), [10000, 15000]);
   store.close();
 });
+
+test('prunes old candles independently for every asset and timeframe', () => {
+  const store = new MarketDataStore(':memory:');
+  const rows = [];
+  for (let i = 1; i <= 5; i++) rows.push(candle({ startAt: i * 5000, endAt: (i + 1) * 5000 }));
+  for (let i = 1; i <= 4; i++) rows.push(candle({ asset: 'GBPUSD_OTC', startAt: i * 5000, endAt: (i + 1) * 5000 }));
+  store.upsertCandles(rows);
+  assert.equal(store.pruneCandles(2), 5);
+  assert.deepEqual(store.getCandles('EURUSD_OTC', 'S5').map(row => row.startAt), [20000, 25000]);
+  assert.deepEqual(store.getCandles('GBPUSD_OTC', 'S5').map(row => row.startAt), [15000, 20000]);
+  store.close();
+});
