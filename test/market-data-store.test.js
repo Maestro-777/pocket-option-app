@@ -256,3 +256,15 @@ test('allows an entry point inside a candle while excluding that candle from inp
   assert.equal(saved.postCandles.some(item => item.startAt < 12500 && item.endAt > 12500), true);
   store.close();
 });
+
+test('automatically keeps the configured rolling candle count per series on upsert', () => {
+  const store = new MarketDataStore(':memory:', { maxCandlesPerSeries: 2 });
+  const rows = [];
+  for (let i = 1; i <= 5; i++) rows.push(candle({ startAt: i * 5000, endAt: (i + 1) * 5000 }));
+  for (let i = 1; i <= 3; i++) rows.push(candle({ asset: 'GBPUSD_OTC', startAt: i * 5000, endAt: (i + 1) * 5000 }));
+  store.upsertCandles(rows);
+  assert.deepEqual(store.getCandles('EURUSD_OTC', 'S5').map(row => row.startAt), [20000, 25000]);
+  assert.deepEqual(store.getCandles('GBPUSD_OTC', 'S5').map(row => row.startAt), [10000, 15000]);
+  assert.throws(() => new MarketDataStore(':memory:', { maxCandlesPerSeries: 0 }), /maxCandlesPerSeries/);
+  store.close();
+});
