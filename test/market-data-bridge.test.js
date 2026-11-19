@@ -43,3 +43,10 @@ test('does not click when the requested asset is not confirmed in the DOM',async
  const result=await window.__PT_TRADE_COMMAND__({version:1,asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1,expirySeconds:15,switchTimeoutMs:100});
  assert.equal(result.ok,false);assert.equal(result.reason,'asset_switch_not_confirmed');assert.equal(clicks,0);assert.equal(sent.length,1);
 });
+
+test('forwards only allowlisted fields from closed-trade events',()=>{
+ const {window,messages}=setup(),ws=new window.WebSocket('wss://market.invalid');
+ ws.emit('42["successcloseOrder",{"deals":[{"id":"broker-1","asset":"EURUSD_otc","amount":1,"profit":0.8,"direction":"call","password":"must-not-pass"}]}]');
+ assert.equal(messages.length,1);assert.equal(messages[0].data.eventName,'successcloseOrder');
+ const deal=messages[0].data.payload[0].deals[0];assert.equal(deal.id,'broker-1');assert.equal(deal.asset,'EURUSD_otc');assert.equal(deal.profit,0.8);assert.equal(deal.password,undefined);
+});
