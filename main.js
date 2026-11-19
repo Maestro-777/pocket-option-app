@@ -291,10 +291,11 @@ ipcMain.handle('app:account:switch', async (_event, target) => {
       type: 'warning', buttons: ['Отмена', 'Перейти на REAL'], defaultId: 0, cancelId: 0,
       title: 'Подтверждение реального счёта',
       message: 'Переключить Pocket Option на REAL?',
-      detail: 'На реальном счёте действия на сайте могут повлечь финансовые последствия. Приложение не совершает сделки автоматически.'
+      detail: 'На реальном счёте действия на сайте могут повлечь финансовые последствия. Автоматическое исполнение в приложении разрешено только для DEMO.'
     });
     if (answer.response !== 1) return { ok: false, cancelled: true };
   }
+  if (mode === 'REAL' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); saveSettings(); log('warn', 'Автоторговля выключена перед переходом на REAL'); }
   log('warn', 'Запрошено переключение счёта', { from: selectedAccount, to: mode });
   try {
     await siteWindow.loadURL(ACCOUNT_URLS[mode]);
@@ -487,7 +488,9 @@ ipcMain.on('site:balance', (event, payload) => {
   if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
   if (payload.ts && payload.ts < (lastBalance?.ts || 0)) return;
   lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
-  lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
+  lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase();
+  if (payload.accountType !== 'demo' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); saveSettings(); log('warn', 'Автоторговля автоматически отключена: обнаружен не-DEMO счёт'); }
+  publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
