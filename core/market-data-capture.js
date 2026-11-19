@@ -102,8 +102,7 @@ class MarketDataCapture {
         const asset = this.assetCatalog.resolve(history.asset);
         if (asset?.source === 'explicit-otc-suffix') this.assetCatalog.rememberExplicitOtc(history.asset);
         if (asset?.isOTC && asset.asset) {
-          const result = this.marketDataHub.ingestHistoricalCandles(history.candles.map(candle => ({ ...candle, asset: asset.asset })));
-          if (result.accepted > 0) this.log('info', 'Получены исторические OTC-свечи', { asset: asset.asset, timeframe: history.timeframe, accepted: result.accepted, skipped: result.skipped });
+          this.marketDataHub.ingestHistoricalCandles(history.candles.map(candle => ({ ...candle, asset: asset.asset })));
         } else {
           this.rejectedHistoryRows += history.candles.length;
         }
