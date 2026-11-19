@@ -18,6 +18,7 @@ const api = {
   switchAccount: mode => ipcRenderer.invoke('app:account:switch', mode),
   toggleWidget: () => ipcRenderer.invoke('app:toggle-widget'),
   getSettings: () => ipcRenderer.invoke('app:settings:get'),
+  saveAnalysisSettings: value => ipcRenderer.invoke('app:analysis-settings:save', value),
   saveSettings: value => ipcRenderer.invoke('app:settings:save', value),
   runCheck: () => ipcRenderer.invoke('app:run-check'),
   readLogs: () => ipcRenderer.invoke('app:logs:read'),
