@@ -388,23 +388,26 @@ ipcMain.handle('app:reload-site', async () => {
 ipcMain.handle('app:toggle-widget', () => { toggleWidget(); return { ok: true }; });
 ipcMain.handle('app:analysis-settings:save', (event, next) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
-  const config = validateOptions(next);
+  const input = next && typeof next === 'object' && !Array.isArray(next) ? next : {};
+  const config = validateOptions(input);
+  let selectedTimeframes = settings.analysisTimeframes;
+  if (input.analysisTimeframes != null) {
+    if (!Array.isArray(input.analysisTimeframes) || input.analysisTimeframes.length === 0) throw new TypeError('Выберите хотя бы один таймфрейм');
+    const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
+    selectedTimeframes = [...new Set(input.analysisTimeframes.map(value => String(value).toUpperCase()))];
+    if (selectedTimeframes.some(value => !allowed.includes(value))) throw new TypeError('Выбран неподдерживаемый таймфрейм');
+  }
   settings.similarityTopK = config.topK;
   settings.similarityMinSimilarity = config.minSimilarity;
   settings.similarityMinExamples = config.minExamples;
   settings.similarityMinDirectionVotes = config.minDirectionVotes;
   settings.similarityLookback = config.lookback;
-  if (next.analysisTimeframes != null) {
-    if (!Array.isArray(next.analysisTimeframes) || next.analysisTimeframes.length === 0) throw new TypeError('Выберите хотя бы один таймфрейм');
-    const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
-    const selected = [...new Set(next.analysisTimeframes.map(value => String(value).toUpperCase()))];
-    if (selected.some(value => !allowed.includes(value))) throw new TypeError('Выбран неподдерживаемый таймфрейм');
-    settings.analysisTimeframes = selected;
-  }
+  settings.analysisTimeframes = selectedTimeframes;
   saveSettings();
   log('info', 'Настройки поиска совпадений сохранены', {
     topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
-    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback,
+    analysisTimeframes: selectedTimeframes
   });
   return {
     topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
