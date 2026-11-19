@@ -13,6 +13,9 @@ const { DecisionJournal } = require('./core/decision-journal');
 const { MarketDataStore } = require('./core/market-data-store');
 const { SignalScheduler, normalizeSchedulerConfig } = require('./core/signal-scheduler');
 const { analyzeSituation } = require('./core/matcher');
+const { TradingGate } = require('./core/trading-gate');
+const { TradeLedger } = require('./core/trade-ledger');
+const { TradeExecutionAdapter } = require('./core/trade-execution');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -49,13 +52,18 @@ let marketDataSaveTimer = null;
 let shutdownInProgress = false;
 let allowQuit = false;
 let signalScheduler = null;
+let tradeExecutionAdapter = null;
+const tradingGate = new TradingGate({ paused: true });
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  autoTradingEnabled: false,
+  baseBet: 1,
+  defaultExpirySeconds: 15
 };
 
 const userRoot = () => app.getPath('userData');
@@ -65,6 +73,7 @@ const logFile = () => path.join(logsDir(), 'application.log');
 const exampleStore = new ExampleStore(path.join(userRoot(), 'data', 'examples.json'));
 const decisionJournal = new DecisionJournal(path.join(logsDir(), 'decisions.jsonl'));
 const marketDataStore = new MarketDataStore(marketDataService, path.join(userRoot(), 'data', 'market-data.json'));
+const tradeLedger = new TradeLedger(path.join(userRoot(), 'data', 'trades.json'));
 
 function log(level, message, data) {
   const row = { at: new Date().toISOString(), level, message: String(message), ...(data ? { data } : {}) };
@@ -228,7 +237,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null
+    reconnectAttempts, update: updateState, marketData: marketDataService.getStatus(), signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
   };
 }
 function publishStatus() {
@@ -435,6 +444,41 @@ ipcMain.handle('app:analysis:get-recent', event => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   return { ok: true, decisions: signalScheduler ? signalScheduler.getRecentDecisions() : [] };
 });
+ipcMain.handle('app:trading:get-state', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  return { ok: true, enabled: settings.autoTradingEnabled === true, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null, account: { selected: selectedAccount, detected: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }, stats: tradeLedger.getStats(), openTrades: tradeLedger.listOpen() };
+});
+ipcMain.handle('app:trading:set-enabled', (event, enabled) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (enabled !== true && enabled !== false) return { ok: false, reason: 'invalid_enabled_value' };
+  if (enabled) {
+    const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
+    if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_account_not_verified' };
+    if (tradeLedger.listOpen().length >= Number(settings.analysisConfig && settings.analysisConfig.maxOpenTrades || 1)) return { ok: false, reason: 'open_trade_limit_reached_or_unresolved_trades' };
+    settings.autoTradingEnabled = true; tradingGate.setPaused(false);
+  } else { settings.autoTradingEnabled = false; tradingGate.setPaused(true); }
+  saveSettings(); publishStatus();
+  return { ok: true, enabled: settings.autoTradingEnabled, gate: tradingGate.getState() };
+});
+ipcMain.handle('app:trading:set-paused', (event, paused) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (typeof paused !== 'boolean') return { ok: false, reason: 'invalid_paused_value' };
+  if (!paused) {
+    const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
+    if (settings.autoTradingEnabled !== true || selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_auto_trading_not_armed' };
+  }
+  tradingGate.setPaused(paused); publishStatus();
+  return { ok: true, gate: tradingGate.getState() };
+});
+ipcMain.handle('app:trading:set-config', (event, config = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return { ok: false, reason: 'invalid_config' };
+  const baseBet = Number(config.baseBet), expiry = Number(config.defaultExpirySeconds);
+  if (!Number.isFinite(baseBet) || baseBet <= 0 || baseBet > 100000 || !Number.isInteger(expiry) || expiry < 1 || expiry > 86400) return { ok: false, reason: 'invalid_trade_settings' };
+  settings.baseBet = baseBet; settings.defaultExpirySeconds = expiry; saveSettings();
+  return { ok: true, baseBet, defaultExpirySeconds: expiry };
+});
+
 
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
@@ -596,6 +640,7 @@ app.on('before-quit', event => {
   clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
   if (signalScheduler) signalScheduler.stop();
   clearInterval(marketDataSaveTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
+  settings.autoTradingEnabled = false; tradingGate.setPaused(true); try { saveSettings(); } catch (error) { log('error', 'Не удалось сохранить безопасное состояние торговли', String(error)); }
   log('info', 'Приложение завершает работу; сохраняем рыночные данные');
   const tasks = [marketDataStore.save().catch(error => log('error', 'Не удалось сохранить рыночные данные', String(error)))];
   if (moduleManager) tasks.push(moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error))));
@@ -609,15 +654,31 @@ if (!lock) app.quit();
 else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
   loadSettings();
+  if (settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; saveSettings(); log('warn', 'Автоторговля отключена при запуске; требуется повторное включение в DEMO'); }
   try { const restored = await marketDataStore.load(); if (restored) log('info', 'Рыночные данные восстановлены из локального снимка', { ticks: restored.tickCount, historyCandles: restored.historyCandleCount }); }
   catch (error) { log('error', 'Снимок рыночных данных повреждён или несовместим; запускаем пустой буфер', String(error)); }
+  try { await tradeLedger.load(); const openTrades = tradeLedger.listOpen(); if (openTrades.length) { tradingGate.restoreOpenTrades(openTrades); log('warn', 'Обнаружены незавершённые DEMO сделки; торговля остаётся на паузе', { count: openTrades.length }); } }
+  catch (error) { tradingGate.setPaused(true); settings.autoTradingEnabled = false; log('error', 'Не удалось восстановить журнал сделок; автоторговля заблокирована', String(error)); }
   createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
+  tradeExecutionAdapter = new TradeExecutionAdapter({
+    gate: tradingGate, marketData: marketDataService, journal: decisionJournal, ledger: tradeLedger,
+    getSettings: () => settings,
+    getAccount: () => ({ mode: selectedAccount, accountType: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
+    getSiteWindow: () => siteWindow,
+    onUpdate: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:trade-update', item); log('info', 'Обновление состояния сделки', item); }
+  });
+  tradeExecutionAdapter.restore(tradeLedger.listOpen());
   signalScheduler = new SignalScheduler({
     marketData: marketDataService, exampleStore, journal: decisionJournal,
     getConfig: () => settings.analysisConfig || {},
-    onDecision: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item); },
+    onDecision: item => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item);
+      if (settings.autoTradingEnabled === true && item.decision && item.decision.accepted === true && item.withinConfiguredLimit === true && tradeExecutionAdapter) {
+        tradeExecutionAdapter.execute(item).catch(error => log('error', 'Ошибка отправки DEMO-сделки', String(error)));
+      }
+    },
     onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
   });
   try { signalScheduler.start(); }
