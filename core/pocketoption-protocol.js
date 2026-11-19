@@ -145,10 +145,10 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
   const balanceValue = successClose ? finiteNumber(payload?.balance ?? payload?.wallet) : finiteNumber(payload?.balance ?? payload?.wallet);
   let deals;
   if (successClose) deals = Array.isArray(payload?.deals) ? payload.deals : Array.isArray(payload) ? payload : [payload];
-  else {
-    const first = Array.isArray(payload) ? payload[0] : payload;
-    deals = Array.isArray(first) ? first : [first];
-  }
+  else if (Array.isArray(payload?.deals)) deals = payload.deals;
+  else if (Array.isArray(payload)) {
+    deals = payload.length === 1 && Array.isArray(payload[0]) ? payload[0] : payload;
+  } else deals = [payload];
   const results = [];
   for (const deal of deals) {
     if (!deal || typeof deal !== 'object') continue;
