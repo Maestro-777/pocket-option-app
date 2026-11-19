@@ -254,7 +254,7 @@ class MarketDataStore {
     if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw new TypeError('Некорректный идентификатор примера');
     if (!asset.endsWith('_OTC') || !/^[A-Z0-9._-]{1,64}$/.test(asset)) throw new TypeError('Пример должен относиться к OTC-активу');
     if (!VALID_TIMEFRAMES.has(timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
-    if (![segmentStart, segmentEnd, entryAt].every(Number.isSafeInteger) || segmentStart <= 0 || segmentEnd <= segmentStart || entryAt < segmentStart || entryAt >= segmentEnd || segmentStart % TIMEFRAME_MS[timeframe] !== 0 || entryAt % TIMEFRAME_MS[timeframe] !== 0 || segmentEnd % TIMEFRAME_MS[timeframe] !== 0) throw new TypeError('Некорректные границы участка или точка входа');
+    if (![segmentStart, segmentEnd, entryAt].every(Number.isSafeInteger) || segmentStart <= 0 || segmentEnd <= segmentStart || entryAt < segmentStart || entryAt >= segmentEnd || segmentStart % TIMEFRAME_MS[timeframe] !== 0 || segmentEnd % TIMEFRAME_MS[timeframe] !== 0) throw new TypeError('Некорректные границы участка или точка входа');
     if (!Number.isInteger(expirySeconds) || expirySeconds < 1 || expirySeconds > 86400) throw new TypeError('Экспирация должна быть от 1 до 86400 секунд');
     if (!['UP','DOWN'].includes(direction)) throw new TypeError('Направление должно быть UP или DOWN');
     if (!Number.isFinite(entryPrice) || entryPrice <= 0 || (expiryPrice != null && (!Number.isFinite(expiryPrice) || expiryPrice <= 0))) throw new TypeError('Некорректная цена входа или экспирации');
