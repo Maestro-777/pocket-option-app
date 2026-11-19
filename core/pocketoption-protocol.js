@@ -16,6 +16,7 @@ function toMilliseconds(value) {
 
 
 const { TIMEFRAME_MS } = require('./timeframes');
+const crypto = require('node:crypto');
 const HISTORY_EVENTS = new Set(['updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2']);
 
 function detectHistoryOhlcLayout(rows) {
@@ -122,8 +123,16 @@ function normalizeStreamTicks(eventName, payload, receivedAt = Date.now()) {
  * Binary payloads are UTF-8 JSON, not MessagePack.
  */
 function finiteNumber(value) {
+  if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function normalizeTimeframe(value) {
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, raw)) return raw;
+  const seconds = finiteNumber(value);
+  return seconds == null ? null : Object.keys(TIMEFRAME_MS).find(key => TIMEFRAME_MS[key] / 1000 === seconds) || null;
 }
 
 function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
@@ -144,7 +153,7 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
   for (const deal of deals) {
     if (!deal || typeof deal !== 'object') continue;
     const brokerTradeId = deal.id ?? deal.ticket ?? null;
-    const amount = finiteNumber(deal.amount ?? deal.investment ?? 1);
+    const amount = finiteNumber(deal.amount ?? deal.investment);
     const rawProfit = finiteNumber(deal.profit ?? 0);
     if (amount == null || amount <= 0 || rawProfit == null) continue;
     let result, profit;
@@ -158,13 +167,13 @@ function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
       else { result = 'LOSS'; profit = -amount; }
     }
     const assetRaw = deal.asset ?? deal.symbol ?? deal.active ?? deal.pair ?? null;
-    const timeframeRaw = String(deal.timeframe ?? deal.period ?? deal.interval ?? '').toUpperCase();
+    const timeframeRaw = normalizeTimeframe(deal.timeframe ?? deal.period ?? deal.interval);
     const directionRaw = String(deal.direction ?? deal.action ?? deal.type ?? '').toUpperCase();
     const accountRaw = String(deal.accountMode ?? deal.account_type ?? payload?.accountMode ?? '').toUpperCase();
     results.push({
       brokerTradeId: brokerTradeId == null ? null : String(brokerTradeId),
       asset: typeof assetRaw === 'string' ? assetRaw : null,
-      timeframe: Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, timeframeRaw) ? timeframeRaw : null,
+      timeframe: timeframeRaw,
       direction: ['UP', 'CALL', 'BUY', 'HIGH'].includes(directionRaw) ? 'UP'
         : ['DOWN', 'PUT', 'SELL', 'LOW'].includes(directionRaw) ? 'DOWN' : null,
       accountMode: accountRaw.includes('DEMO') ? 'DEMO' : accountRaw.includes('REAL') ? 'REAL' : 'UNKNOWN',
