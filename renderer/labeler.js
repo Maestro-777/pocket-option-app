@@ -606,7 +606,9 @@ function renderTradeStatistics(statistics, recent) {
   const groups = [
     ['Счёт', statistics?.byAccountMode || []],
     ['Пара', (statistics?.byAsset || []).slice(0, 8)],
-    ['Таймфрейм', statistics?.byTimeframe || []]
+    ['Таймфрейм', statistics?.byTimeframe || []],
+    ['Направление', statistics?.byDirection || []],
+    ['Экспирация, сек.', statistics?.byExpiry || []]
   ];
   for (const [label, items] of groups) {
     const block = document.createElement('div');
