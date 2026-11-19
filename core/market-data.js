@@ -13,8 +13,8 @@ function normalizeAssetName(raw) {
   if (raw == null) return '';
   let value = String(raw).trim().toUpperCase();
   if (!value || value.length > 80) return '';
-  const isOtc = /\\bOTC\\b|_OTC$/i.test(value);
-  value = value.replace(/\\bOTC\\b/gi, '').replace(/_OTC$/i, '');
+  const isOtc = /\bOTC\b|_OTC$/i.test(value);
+  value = value.replace(/\bOTC\b/gi, '').replace(/_OTC$/i, '');
   value = value.replace(/^#/, '').replace(/[^A-Z0-9]/g, '');
   if (!value || value.length > 32) return '';
   return isOtc ? value + '_OTC' : value;
