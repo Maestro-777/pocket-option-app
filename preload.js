@@ -37,6 +37,7 @@ const api = {
   setTradingEnabled: enabled => ipcRenderer.invoke('app:trading:set-enabled', enabled),
   setTradingPaused: paused => ipcRenderer.invoke('app:trading:set-paused', paused),
   setTradingConfig: config => ipcRenderer.invoke('app:trading:set-config', config || {}),
+  resolveTrade: request => ipcRenderer.invoke('app:trading:resolve', request || {}),
   onTradeUpdate: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:trade-update', h); return () => ipcRenderer.removeListener('app:trade-update', h); }
 };
 contextBridge.exposeInMainWorld('pocketApp', api);
