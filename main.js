@@ -188,6 +188,7 @@ async function injectMarketDataBridge(win) {
   }
 }
 async function attachMarketDataCapture(win) {
+  if (marketDataCapture) marketDataCapture.close();
   const sink = {
     ingest: tick => ({ accepted: marketDataService.ingestTicks([{ asset: tick.asset, rawSymbol: tick.rawSymbol, ts: tick.ts, price: tick.price }]) > 0 }),
     ingestAssets: payload => marketDataService.ingestAssets(payload)
@@ -226,7 +227,12 @@ async function launchSite() {
   if (!siteWindow || siteWindow.isDestroyed()) return;
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
-    injectSiteBridge(siteWindow); publishStatus();
+    injectSiteBridge(siteWindow);
+    if (marketDataCapture && !marketDataCapture.attached && ['detached', 'error'].includes(marketDataCapture.getStatus().status)) {
+      const currentWindow = siteWindow;
+      attachMarketDataCapture(currentWindow).then(async attached => { if (attached && currentWindow && !currentWindow.isDestroyed()) { await injectMarketDataBridge(currentWindow); await currentWindow.webContents.executeJavaScript('window.__PT_CAPTURE_MODE__ = true;', true).catch(() => {}); } }).catch(error => log('error', 'Не удалось восстановить CDP capture', String(error)));
+    }
+    publishStatus();
   });
   siteWindow.webContents.on('dom-ready', () => injectSiteBridge(siteWindow));
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
