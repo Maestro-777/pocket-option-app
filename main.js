@@ -476,7 +476,7 @@ ipcMain.handle('app:trading:set-paused', (event, paused) => {
 ipcMain.handle('app:trading:set-config', (event, config = {}) => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   if (!config || typeof config !== 'object' || Array.isArray(config)) return { ok: false, reason: 'invalid_config' };
-  const baseBet = Number(config.baseBet), expiry = Number(config.defaultExpirySeconds);
+  const baseBet = Number(Number(config.baseBet).toFixed(2)), expiry = Number(config.defaultExpirySeconds);
   if (!Number.isFinite(baseBet) || baseBet <= 0 || baseBet > 100000 || !Number.isInteger(expiry) || expiry < 1 || expiry > 86400) return { ok: false, reason: 'invalid_trade_settings' };
   settings.baseBet = baseBet; settings.defaultExpirySeconds = expiry; saveSettings();
   return { ok: true, baseBet, defaultExpirySeconds: expiry };
