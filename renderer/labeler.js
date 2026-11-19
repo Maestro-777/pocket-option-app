@@ -365,6 +365,15 @@ async function loadExamples() {
   }
 }
 
+async function loadAnalysisSettings() {
+  const saved = await api.getSettings();
+  $('analysis-topk').value = String(saved.similarityTopK ?? 10);
+  $('analysis-threshold').value = String(saved.similarityMinSimilarity ?? 80);
+  $('analysis-min-examples').value = String(saved.similarityMinExamples ?? 3);
+  $('analysis-min-votes').value = String(saved.similarityMinDirectionVotes ?? 6);
+  $('analysis-lookback').value = String(saved.similarityLookback ?? 30);
+}
+
 function readAnalysisOptions() {
   return {
     topK: Number($('analysis-topk').value),
@@ -427,7 +436,9 @@ async function runSimilarityAnalysis() {
   button.disabled = true;
   button.textContent = 'Анализ…';
   try {
-    const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), readAnalysisOptions());
+    const options = readAnalysisOptions();
+    await api.saveAnalysisSettings(options);
+    const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), options);
     renderAnalysis(result);
     setStatus(result.status === 'SIGNAL' ? 'Найдено направление: ' + (result.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : 'Совпадения проверены: сигнала нет');
   } catch (error) {
@@ -446,7 +457,9 @@ async function runSimilarityBacktest() {
   button.disabled = true;
   button.textContent = 'Проверка…';
   try {
-    const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), readAnalysisOptions());
+    const options = readAnalysisOptions();
+    await api.saveAnalysisSettings(options);
+    const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), options);
     const accuracy = report.accuracy == null ? 'недостаточно сигналов' : report.accuracy.toFixed(2) + '%';
     $('backtest-summary').textContent =
       'Период: ' + report.timeframe +
@@ -470,6 +483,7 @@ async function runSimilarityBacktest() {
 }
 
 async function reloadAll() {
+  await loadAnalysisSettings();
   await loadAssets();
   await loadChart();
   await loadExamples();
