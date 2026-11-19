@@ -15,6 +15,7 @@ class MarketDataCapture {
     this.log = typeof options.log === 'function' ? options.log : () => {};
     this.onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
     this.onTick = typeof options.onTick === 'function' ? options.onTick : () => {};
+    this.onTradeResult = typeof options.onTradeResult === 'function' ? options.onTradeResult : () => {};
     this.maxSockets = options.maxSockets == null ? 32 : Number(options.maxSockets);
     if (!Number.isInteger(this.maxSockets) || this.maxSockets < 1 || this.maxSockets > 1024) throw new RangeError('maxSockets должен быть целым числом от 1 до 1024');
     this.status = 'idle';
@@ -28,6 +29,8 @@ class MarketDataCapture {
     this.rejectedNonOtcAssets = 0;
     this.rejectedAmbiguousAssets = 0;
     this.rejectedHistoryRows = 0;
+    this.receivedTradeResults = 0;
+    this.rejectedTradeResults = 0;
     this._ownsDebugger = false;
     this._closing = false;
     this._protocols = new Map();
@@ -91,6 +94,18 @@ class MarketDataCapture {
     }
     this.lastFrameAt = Date.now();
     const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
+    if (decoded?.tradeResults?.length) {
+      for (const tradeResult of decoded.tradeResults) {
+        try {
+          this.onTradeResult(tradeResult);
+          this.receivedTradeResults++;
+        } catch (error) {
+          this.rejectedTradeResults++;
+          this.log('warn', 'Не удалось передать результат сделки в локальный журнал', String(error?.message || error));
+        }
+      }
+      this._notify();
+    }
     if (decoded?.eventName === 'updateAssets') {
       const catalogResult = this.assetCatalog.ingest(decoded.payload);
       if (catalogResult.accepted > 0) this.log('info', 'Получен каталог активов Pocket Option', catalogResult);
@@ -153,6 +168,7 @@ class MarketDataCapture {
       rejectedNonOtcAssets: this.rejectedNonOtcAssets,
       rejectedAmbiguousAssets: this.rejectedAmbiguousAssets,
       rejectedHistoryRows: this.rejectedHistoryRows,
+      receivedTradeResults: this.receivedTradeResults, rejectedTradeResults: this.rejectedTradeResults,
       catalog: { total: this.assetCatalog.size, otc: this.assetCatalog.listOTC().length, revision: this.assetCatalog.revision, ...this.assetCatalog.stats },
       protocol
     };
