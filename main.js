@@ -15,6 +15,7 @@ const { SignalScheduler, normalizeSchedulerConfig } = require('./core/signal-sch
 const { analyzeSituation } = require('./core/matcher');
 const { TradingGate } = require('./core/trading-gate');
 const { TradeLedger } = require('./core/trade-ledger');
+const { ScanStateStore } = require('./core/scan-state-store');
 const { TradeExecutionAdapter } = require('./core/trade-execution');
 
 const APP_NAME = 'Pocket Option Background';
@@ -76,6 +77,7 @@ const exampleStore = new ExampleStore(path.join(userRoot(), 'data', 'examples.js
 const decisionJournal = new DecisionJournal(path.join(logsDir(), 'decisions.jsonl'));
 const marketDataStore = new MarketDataStore(marketDataService, path.join(userRoot(), 'data', 'market-data.json'));
 const tradeLedger = new TradeLedger(path.join(userRoot(), 'data', 'trades.json'));
+const scanStateStore = new ScanStateStore(path.join(userRoot(), 'data', 'scan-state.json'));
 
 function log(level, message, data) {
   const row = { at: new Date().toISOString(), level, message: String(message), ...(data ? { data } : {}) };
@@ -709,7 +711,7 @@ else app.whenReady().then(async () => {
   });
   tradeExecutionAdapter.restore(tradeLedger.listOpen());
   signalScheduler = new SignalScheduler({
-    marketData: marketDataService, exampleStore, journal: decisionJournal,
+    marketData: marketDataService, exampleStore, journal: decisionJournal, stateStore: scanStateStore,
     getConfig: () => settings.analysisConfig || {},
     onDecision: item => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item);
@@ -720,6 +722,7 @@ else app.whenReady().then(async () => {
     },
     onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
   });
+  try { const scanState = await signalScheduler.restoreState(); log('info', 'Восстановлено состояние обработанных баров', scanState); } catch (error) { log('error', 'Не удалось восстановить scan state', String(error)); }
   try { const persistedDecisions = await decisionJournal.readRecent(100000); const restored = signalScheduler.restoreProcessedDecisions(persistedDecisions); log('info', 'Восстановлена дедупликация обработанных баров', restored); } catch (error) { log('error', 'Не удалось восстановить дедупликацию решений', String(error)); }
   try { signalScheduler.start(); }
   catch (error) { log('error', 'Сохранённые параметры анализа некорректны; применяем безопасные настройки по умолчанию', String(error)); settings.analysisConfig = {}; signalScheduler.start(); }
