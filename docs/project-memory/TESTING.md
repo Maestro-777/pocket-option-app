@@ -14,8 +14,9 @@
 ### Подтверждено чтением и unit-тестами
 - [x] Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса и модульный менеджер.
 - [x] По исходникам 3.6.0 установлено: бинарные Socket.IO payload декодируются как UTF-8 JSON; updateStream/quotes/stream несут тики, в том числе нескольких активов.
-- [x] Локально на Node.js 22.16.0: `node --test` — 26 тестов пройдены, 0 ошибок (временная локальная копия исходников).
-- [x] Unit-тесты CandleSeries, MarketDataHub, Socket.IO decoder и CDP capture adapter с mock debugger.
+- [x] Локально на Node.js 22.16.0: `node --test` — 32 теста пройдены, 0 ошибок (временная локальная копия исходников).
+- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder и CDP capture adapter с mock debugger.
+- [x] OTC-фильтр: проверка явного OTC, normal assets, неизвестных символов и неоднозначных alias.
 - [x] Тесты покрывают таймфреймы, OHLC, поздние тики, ограничение памяти, pre-entry окно, изоляцию сокетов и обработку malformed frames.
 
 ### Не запускалось или не подтверждено
