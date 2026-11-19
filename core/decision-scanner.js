@@ -25,7 +25,28 @@ class DecisionScanner {
     this._lastScanned = new Map();
     this._restoredKeys = new Set();
     this._latestSignals = new Map();
+    this._restoreLatestSignals();
     this.stats = { decisions: 0, signals: 0, noSignals: 0, errors: 0, skipped: 0, lastScanAt: null };
+  }
+
+  _restoreLatestSignals() {
+    try {
+      const recent = this.marketDataStore.listAnalysisDecisions({ limit: 1000 });
+      const seen = new Set();
+      const now = Date.now();
+      for (const decision of recent) {
+        const key = String(decision.asset || '').toUpperCase() + '|' + String(decision.timeframe || '').toUpperCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const duration = TIMEFRAME_MS[String(decision.timeframe || '').toUpperCase()];
+        const age = now - Number(decision.decisionAt);
+        if (decision.status === 'SIGNAL' && duration && Number.isSafeInteger(decision.decisionAt) && age >= 0 && age < duration) {
+          this._latestSignals.set(key, decision);
+        }
+      }
+    } catch (error) {
+      this.log('warn', 'Не удалось восстановить список актуальных сигналов из журнала', String(error?.message || error));
+    }
   }
 
   enqueue(asset) {
