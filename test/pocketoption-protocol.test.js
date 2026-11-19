@@ -103,3 +103,12 @@ test('normalizes numeric broker timeframe and creates stable trade result identi
   assert.equal(results[0].direction, 'DOWN');
   assert.equal(results[0].eventKey, 'broker:abc-1');
 });
+
+test('normalizes every trade in a flat legacy close array', () => {
+  const results = normalizeTradeResults('s_orders/close', [
+    { id: 'flat-1', amount: 2, profit: 1.7, status: 'win' },
+    { id: 'flat-2', amount: 3, profit: 0, status: 'lose' }
+  ], 1700000001000);
+  assert.deepEqual(results.map(item => item.brokerTradeId), ['flat-1', 'flat-2']);
+  assert.deepEqual(results.map(item => item.result), ['WIN', 'LOSS']);
+});
