@@ -60,7 +60,7 @@ if (!window.__PT_PO_PRELOAD_BRIDGE_INSTALLED__) {
       if (!visible(root)) continue;
       const real = root.querySelector('.js-balance-real-USD,.js-hd.js-balance-real-USD,.js-balance-real');
       const demo = root.querySelector('.js-balance-demo,.js-hd.js-balance-demo');
-      if (real && !hidden(real) && parseBalance(real) != null) return { accountType: 'demo', balance: parseBalance(real) };
+      if (real && !hidden(real) && parseBalance(real) != null) return { accountType: 'real', balance: parseBalance(real) };
       if (demo && !hidden(demo) && parseBalance(demo) != null) return { accountType: 'demo', balance: parseBalance(demo) };
     }
 
