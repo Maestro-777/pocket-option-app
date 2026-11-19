@@ -708,7 +708,7 @@ else app.whenReady().then(async () => {
   tradeExecutionAdapter = new TradeExecutionAdapter({
     gate: tradingGate, marketData: marketDataService, journal: decisionJournal, ledger: tradeLedger,
     getSettings: () => settings,
-    getAccount: () => ({ mode: selectedAccount, accountType: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
+    getAccount: () => ({ mode: selectedAccount, accountType: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, balanceAt: lastBalance && lastBalance.ts, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
     getSiteWindow: () => siteWindow,
     onUpdate: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:trade-update', item); if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:trade-update', item); log('info', 'Обновление состояния сделки', item); }
   });
