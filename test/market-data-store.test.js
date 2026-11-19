@@ -314,6 +314,7 @@ test('rejects invalid broker trade result records', () => {
   assert.throws(() => store.recordTradeResult({ amount: 0, profit: 1, result: 'WIN', closedAt: 10 }), /сумма или P\/L/);
   assert.throws(() => store.recordTradeResult({ amount: 1, profit: 1, result: 'UNKNOWN', closedAt: 10 }), /исход сделки/);
   assert.throws(() => store.recordTradeResult({ amount: 1, profit: 1, result: 'WIN', closedAt: 10, timeframe: 'M4' }), /таймфрейм/);
+  assert.throws(() => store.recordTradeResult({ amount: 1, profit: 1, result: 'WIN', closedAt: 10, expirySeconds: 5.5 }), /экспирация/);
   store.close();
 });
 
