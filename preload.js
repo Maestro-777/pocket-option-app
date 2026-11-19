@@ -32,6 +32,11 @@ const api = {
   onLog: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:log', h); return () => ipcRenderer.removeListener('app:log', h); },
   onCheckResult: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:check-result', h); return () => ipcRenderer.removeListener('app:check-result', h); },
   onMarketData: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:market-data', h); return () => ipcRenderer.removeListener('app:market-data', h); },
-  onSignalDecision: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:signal-decision', h); return () => ipcRenderer.removeListener('app:signal-decision', h); }
+  onSignalDecision: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:signal-decision', h); return () => ipcRenderer.removeListener('app:signal-decision', h); },
+  getTradingState: () => ipcRenderer.invoke('app:trading:get-state'),
+  setTradingEnabled: enabled => ipcRenderer.invoke('app:trading:set-enabled', enabled),
+  setTradingPaused: paused => ipcRenderer.invoke('app:trading:set-paused', paused),
+  setTradingConfig: config => ipcRenderer.invoke('app:trading:set-config', config || {}),
+  onTradeUpdate: fn => { const h = (_e, v) => fn(v); ipcRenderer.on('app:trade-update', h); return () => ipcRenderer.removeListener('app:trade-update', h); }
 };
 contextBridge.exposeInMainWorld('pocketApp', api);
