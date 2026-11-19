@@ -91,6 +91,24 @@ class TradeExecutionAdapter{
   }
   return results;
  }
+ async resolveUnknown(tradeId,action,profitValue){
+  const id=String(tradeId),trade=this.submitted.get(id);if(!trade)return{ok:false,reason:'trade_not_found'};
+  if(action==='not_opened'){
+   if(this.ledger)await this.ledger.markRejected(id,'manually_resolved_not_opened');
+   this.gate.releaseOpenTrade(id);this.submitted.delete(id);
+   const record={tradeId:id,pair:trade.pair,reason:'manually_resolved_not_opened',at:new Date().toISOString()};
+   await this._journal('TRADE_REJECTED',record,{});this.onUpdate({type:'resolved',record});return{ok:true,record};
+  }
+  if(action==='closed'){
+   const profit=Number(profitValue);if(!Number.isFinite(profit))return{ok:false,reason:'invalid_profit'};
+   const outcome=profit>0?'WIN':profit<0?'LOSS':'DRAW';
+   if(this.ledger)await this.ledger.closeTrade(id,{profit,outcome,closedAt:Date.now(),platformDealId:null});
+   const closed=await this.gate.closeTrade(id,{outcome});this.submitted.delete(id);
+   const record={tradeId:id,pair:trade.pair,timeframe:trade.timeframe,direction:trade.direction,profit,outcome,closedAt:Date.now(),manuallyReconciled:true};
+   await this._journal('TRADE_CLOSED',record,{});this.onUpdate({type:'closed',trade:closed,result:record});return{ok:true,record};
+  }
+  return{ok:false,reason:'invalid_resolution_action'};
+ }
  restore(records=[]){for(const record of records){if(!record||!['PREPARING','SUBMITTED_UNCONFIRMED','UNKNOWN_AFTER_RESTART'].includes(record.status))continue;this.submitted.set(String(record.tradeId),{...record});}return this.getState();}
  getState(){return{pendingOrSubmitted:this.submitted.size,correlationVerified:this.correlationVerified,trades:Array.from(this.submitted.values()).map(x=>({...x})),ledger:this.ledger?this.ledger.getStatus():null};}
 }
