@@ -479,6 +479,18 @@ ipcMain.handle('app:similarity:analyze', (event, asset, timeframe, options = {})
   const candles = marketDataHub.getCandles(symbol, period, { asOf: entryAt }).slice(-config.lookback);
   const examples = marketDataStore.listManualExamples({ timeframe: period, limit: config.maxExamples });
   const result = analyzeSimilarity({ timeframe: period, entryAt, candles, examples, options: config });
+  try {
+    marketDataStore.createAnalysisDecision({
+      asset: symbol, timeframe: period, decisionAt: entryAt, status: result.status,
+      direction: result.direction === 'NONE' ? null : result.direction,
+      reason: result.reason, paramsSnapshot: result.options, matches: result.matches,
+      votes: result.votes, averageSimilarity: result.averageSimilarity ?? null,
+      queryCandles: candles, algorithmVersion: 'shape-v1'
+    });
+  } catch (error) {
+    log('error', 'Не удалось сохранить решение в журнал', String(error?.message || error));
+    throw new Error('Анализ выполнен, но журнал решения не сохранён: ' + String(error?.message || error));
+  }
   log('info', 'Выполнен поиск исторических совпадений', {
     asset: symbol, timeframe: period, status: result.status, direction: result.direction || 'NONE',
     matches: result.matches.length, qualified: result.qualifiedMatches.length, votes: result.votes
@@ -500,6 +512,11 @@ ipcMain.handle('app:similarity:backtest', (event, timeframe, options = {}) => {
   return report;
 });
 
+ipcMain.handle('app:analysis-decisions:list', (event, filters = {}) => {
+  if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
+  if (!marketDataStore) throw new Error('SQLite хранилище журнала недоступно');
+  return marketDataStore.listAnalysisDecisions(filters);
+});
 ipcMain.handle('app:manual-examples:list', (event, filters = {}) => {
   if (!isTrustedDataWindowSender(event)) throw new Error('Недоверенный отправитель');
   if (!marketDataStore) throw new Error('SQLite хранилище рыночных данных недоступно');
