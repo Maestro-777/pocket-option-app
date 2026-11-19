@@ -20,7 +20,7 @@ function validateExample(input){
     if(![start,end,o,h,l,cl].every(Number.isFinite)||start<entryAt||end<=start||end-start!==duration||start<previousEnd||c.complete!==true||o<=0||h<=0||l<=0||cl<=0||h<Math.max(o,cl,l)||l>Math.min(o,cl,h))throw new RangeError('Некорректная пост-входовая свеча: ожидаются закрытые OHLC-свечи после точки входа');
     previousEnd=end;
   }
-  return {id:input.id?String(input.id):crypto.randomUUID(),pair,timeframe,startAt,endAt,entryAt,direction,expirySeconds,outcome,preEntryCandles,outcomeCandles:outcomeCandles.map(c=>({...c})),createdAt:input.createdAt?String(input.createdAt):new Date().toISOString(),updatedAt:new Date().toISOString()};
+  return {id:input.id?String(input.id):crypto.randomUUID(),pair,timeframe,startAt,endAt,entryAt,direction,expirySeconds,outcome,preEntryCandles,outcomeCandles:outcomeCandles.map(c=>({...c})),createdAt:input.createdAt?String(input.createdAt):new Date().toISOString(),updatedAt:input.updatedAt?String(input.updatedAt):new Date().toISOString()};
 }
 class ExampleStore{
   constructor(filePath){if(!filePath||typeof filePath!=='string')throw new TypeError('Не указан путь к хранилищу');this.filePath=path.resolve(filePath);this.queue=Promise.resolve();this.cache=null;}
