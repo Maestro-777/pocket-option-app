@@ -66,7 +66,7 @@ README и руководства прямо указывают, что теку�
 - Наблюдатель не отправляет команды Pocket Option, не меняет торговые элементы и не выполняет сделки.
 - Разрешённые события: `updateAssets`, `updateStream`, `quotes/stream`, `updateHistoryNewFast`, `updateHistoryNew`, `loadHistoryPeriod`, `loadHistoryPeriodFast`, `history/list/v2`.
 - События пакетируются и проходят через `window.postMessage` → `site-preload.js` → IPC `site:market-batch` → `MarketDataStore` в main process.
-- `core/market-data.js` нормализует имена активов, секундные/миллисекундные timestamps, тики и OHLC-историю; хранит ограниченные буферы отдельно по активам и периодам.
+- `core/market-data.js` нормализует имена активов, секундные/миллисекундные timestamps, тики и OHLC-историю; хранит ограниченные буферы отдельно по активам и периодам. Метод getAggregatedCandles передаёт буфер одного актива в core/timeframes.js для построения согласованных 10 таймфреймов.
 - Main process проверяет отправителя, allow-list событий, размер и частоту IPC batch через core/ipc-validation.js. Тот же модуль проверяет свежесть/частоту balance payload и HTTPS origin allow-list. Сообщения MAIN world остаются недоверенными данными; они не являются источником команд.
 
 Ограничения прототипа:
