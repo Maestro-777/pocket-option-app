@@ -304,6 +304,8 @@ test('records broker trade results idempotently and calculates P/L statistics by
   assert.equal(stats.byAccountMode.find(x => x.key === 'REAL').total, 1);
   assert.equal(stats.byAsset.find(x => x.key === 'EURUSD_OTC').netProfit, -1.5);
   assert.equal(store.listTradeResults({ accountMode: 'REAL' }).length, 1);
+  assert.deepEqual(stats.profitCurve.map(point => [point.accountMode, point.cumulativeProfit]), [['DEMO', 8.5], ['DEMO', -1.5], ['REAL', 0]]);
+  assert.deepEqual(stats.balanceHistory, [{ closedAt: 6000, accountMode: 'DEMO', balance: 108.5 }]);
   store.close();
 });
 
