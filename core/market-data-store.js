@@ -36,6 +36,7 @@ class MarketDataStore {
     if (options == null || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('options должен быть объектом');
     this.databasePath = databasePath;
     this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 1000 : Number(options.maxCandlesPerSeries);
+    this._pruneCounters = new Map();
     if (!Number.isInteger(this.maxCandlesPerSeries) || this.maxCandlesPerSeries < 1 || this.maxCandlesPerSeries > 100_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 100000');
     let DatabaseSync;
     try { ({ DatabaseSync } = require('node:sqlite')); }
@@ -207,10 +208,20 @@ class MarketDataStore {
         const result = this._upsertCandle.run(candle.asset, candle.timeframe, candle.startAt, candle.endAt,
           candle.openAt, candle.closeAt, candle.open, candle.high, candle.low, candle.close, candle.tickCount, updatedAt);
         changes += Number(result.changes || 0);
-        affectedSeries.set(candle.asset + '|' + candle.timeframe, [candle.asset, candle.timeframe]);
+        const key = candle.asset + '|' + candle.timeframe;
+        const entry = affectedSeries.get(key) || { asset: candle.asset, timeframe: candle.timeframe, count: 0 };
+        entry.count++;
+        affectedSeries.set(key, entry);
       }
-      for (const [asset, timeframe] of affectedSeries.values()) {
-        this._pruneCandleSeries.run(asset, timeframe, asset, timeframe, this.maxCandlesPerSeries);
+      const pruneThreshold = Math.min(100, this.maxCandlesPerSeries);
+      for (const [key, entry] of affectedSeries) {
+        const pending = (this._pruneCounters.get(key) || 0) + entry.count;
+        if (pending >= pruneThreshold) {
+          this._pruneCandleSeries.run(entry.asset, entry.timeframe, entry.asset, entry.timeframe, this.maxCandlesPerSeries);
+          this._pruneCounters.set(key, 0);
+        } else {
+          this._pruneCounters.set(key, pending);
+        }
       }
       this.db.exec('COMMIT');
       return changes;
