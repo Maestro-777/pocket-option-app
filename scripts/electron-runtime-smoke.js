@@ -10,7 +10,7 @@ app.whenReady().then(async () => {
   let window;
   try {
     const store = new MarketDataStore(':memory:');
-    if (!store.integrityCheck() || store.getStats().schemaVersion !== 4) throw new Error('SQLite schema v4 did not initialize correctly');
+    if (!store.integrityCheck() || store.getStats().schemaVersion !== 5) throw new Error('SQLite schema v5 did not initialize correctly');
     const now = Date.now();
     store.createAnalysisDecision({
       asset: 'EURUSD_OTC', timeframe: 'S5', decisionAt: now,
