@@ -354,7 +354,7 @@ autoUpdater.on('update-downloaded', info => { updateState = { status: 'downloade
 autoUpdater.on('error', error => { updateState = { status: 'error', version: updateState.version, progress: 0, message: 'Ошибка обновления: ' + String(error.message || error) }; log('error', 'Updater error', String(error)); publishStatus(); });
 
 function configureUpdateChecks() {
-  if (updateCheckTimer) clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
+  if (updateCheckTimer) clearInterval(updateCheckTimer);
   if (updateCheckTimeout) clearTimeout(updateCheckTimeout);
   updateCheckTimer = null;
   updateCheckTimeout = null;
@@ -435,7 +435,7 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
-  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
+  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
