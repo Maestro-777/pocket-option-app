@@ -198,7 +198,7 @@ test('migrates schema version 1 to version 4 without losing market candles', () 
     first.db.exec('DROP TABLE analysis_decisions; DROP TABLE manual_examples; PRAGMA user_version = 1');
     first.close();
     const upgraded = new MarketDataStore(file);
-    assert.equal(upgraded.getStats().schemaVersion, 4);
+    assert.equal(upgraded.getStats().schemaVersion, 5);
     assert.equal(upgraded.getStats().manualExamples, 0);
     assert.equal(upgraded.getCandles('EURUSD_OTC', 'S5').length, 1);
     upgraded.close();
@@ -268,4 +268,64 @@ test('automatically keeps the configured rolling candle count per series on upse
   assert.throws(() => new MarketDataStore(':memory:', { maxCandlesPerSeries: 0 }), /maxCandlesPerSeries/);
   assert.throws(() => new MarketDataStore(':memory:', null), /options/);
   store.close();
+});
+
+test('records broker trade results idempotently and calculates P/L statistics by account and dimensions', () => {
+  const store = new MarketDataStore(':memory:');
+  const win = {
+    eventKey: 'broker:trade-001', brokerTradeId: 'trade-001', asset: 'EURUSD_OTC',
+    timeframe: 'S5', direction: 'UP', accountMode: 'DEMO', amount: 10,
+    profit: 8.5, result: 'WIN', entryAt: 1000, closedAt: 6000,
+    expirySeconds: 5, payoutRate: 85, balanceAfter: 108.5, sourceEvent: 'successcloseOrder'
+  };
+  const first = store.recordTradeResult(win, 7000);
+  assert.equal(first.inserted, true);
+  assert.equal(first.record.profit, 8.5);
+  assert.equal(store.recordTradeResult(win, 8000).duplicate, true);
+  store.recordTradeResult({
+    eventKey: 'broker:trade-002', brokerTradeId: 'trade-002', asset: 'EURUSD_OTC',
+    timeframe: 'S5', direction: 'DOWN', accountMode: 'DEMO', amount: 10,
+    profit: -10, result: 'LOSS', entryAt: 7000, closedAt: 12000,
+    expirySeconds: 5, payoutRate: 85, sourceEvent: 'successcloseOrder'
+  }, 13000);
+  store.recordTradeResult({
+    eventKey: 'broker:trade-003', brokerTradeId: 'trade-003', asset: 'GBPUSD_OTC',
+    timeframe: 'M1', direction: 'UP', accountMode: 'REAL', amount: 5,
+    profit: 0, result: 'DRAW', entryAt: 14000, closedAt: 74000,
+    expirySeconds: 60, sourceEvent: 's_orders/close'
+  }, 75000);
+  const stats = store.getTradeStatistics();
+  assert.deepEqual(stats.overall, {
+    total: 3, wins: 1, losses: 1, draws: 1, winRate: 50,
+    grossProfit: 8.5, grossLoss: -10, netProfit: -1.5,
+    averageProfit: -0.5, totalStake: 25
+  });
+  assert.equal(stats.byAccountMode.find(x => x.key === 'DEMO').total, 2);
+  assert.equal(stats.byAccountMode.find(x => x.key === 'REAL').total, 1);
+  assert.equal(stats.byAsset.find(x => x.key === 'EURUSD_OTC').netProfit, -1.5);
+  assert.equal(store.listTradeResults({ accountMode: 'REAL' }).length, 1);
+  store.close();
+});
+
+test('rejects invalid broker trade result records', () => {
+  const store = new MarketDataStore(':memory:');
+  assert.throws(() => store.recordTradeResult({ amount: 0, profit: 1, result: 'WIN', closedAt: 10 }), /сумма или P\/L/);
+  assert.throws(() => store.recordTradeResult({ amount: 1, profit: 1, result: 'UNKNOWN', closedAt: 10 }), /исход сделки/);
+  assert.throws(() => store.recordTradeResult({ amount: 1, profit: 1, result: 'WIN', closedAt: 10, timeframe: 'M4' }), /таймфрейм/);
+  store.close();
+});
+
+test('migrates schema v4 to v5 trade results table', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const databasePath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pocket-trade-v4-')), 'market.sqlite');
+  const old = new MarketDataStore(databasePath);
+  old.db.exec('DROP TABLE trade_results; PRAGMA user_version=4;');
+  old.close();
+  const upgraded = new MarketDataStore(databasePath);
+  assert.equal(upgraded.getStats().schemaVersion, 5);
+  assert.deepEqual(upgraded.listTradeResults(), []);
+  upgraded.close();
+  fs.rmSync(path.dirname(databasePath), { recursive: true, force: true });
 });
