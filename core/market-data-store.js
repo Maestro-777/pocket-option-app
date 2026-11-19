@@ -396,7 +396,7 @@ class MarketDataStore {
     return Number(result.changes || 0) > 0;
   }
 
-  pruneCandles(maxCandlesPerSeries = 300) {
+  pruneCandles(maxCandlesPerSeries = 1000) {
     this._assertOpen();
     const limit = Number(maxCandlesPerSeries);
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000_000) throw new RangeError('maxCandlesPerSeries должен быть от 1 до 1000000');
