@@ -23,6 +23,8 @@ app.whenReady().then(async () => {
     store.close();
 
     ipcMain.handle('app:market:assets', () => []);
+    ipcMain.handle('app:settings:get', () => ({}));
+    ipcMain.handle('app:analysis-decisions:list', () => []);
     ipcMain.handle('app:manual-examples:list', () => []);
     window = new BrowserWindow({
       show: false,
