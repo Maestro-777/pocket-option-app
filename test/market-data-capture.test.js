@@ -102,6 +102,16 @@ test('uses updateAssets catalog to admit only confirmed OTC assets', async () =>
   capture.close();
 });
 
+test('counts rejected rows in unsupported historical timeframe payloads', async () => {
+  const debuggerApi = new FakeDebugger();
+  const capture = new MarketDataCapture({ debuggerApi, marketDataHub: new MarketDataHub({ timeframes: ['S5'] }) });
+  await capture.attach();
+  debuggerApi.created('history-socket');
+  debuggerApi.frame('history-socket', '42["updateHistoryNewFast",{"asset":"EURUSD_otc","period":7,"history":[[1700000000,1.1,1.2,1.0,1.15]]}]');
+  assert.equal(capture.getStatus().rejectedHistoryRows, 1);
+  capture.close();
+});
+
 test('captures historical OHLC events for confirmed OTC assets', async () => {
   const debuggerApi = new FakeDebugger();
   const hub = new MarketDataHub({ timeframes: ['S5'] });
