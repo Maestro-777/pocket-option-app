@@ -15,7 +15,7 @@ class MarketDataHub {
     }
     this.timeframes = Object.freeze(unique);
     this.maxAssets = options.maxAssets == null ? 150 : Number(options.maxAssets);
-    this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 1_000 : Number(options.maxCandlesPerSeries);
+    this.maxCandlesPerSeries = options.maxCandlesPerSeries == null ? 300 : Number(options.maxCandlesPerSeries);
     if (!Number.isInteger(this.maxAssets) || this.maxAssets < 1 || this.maxAssets > 10_000) throw new RangeError('maxAssets должен быть целым числом от 1 до 10000');
     if (!Number.isInteger(this.maxCandlesPerSeries) || this.maxCandlesPerSeries < 1 || this.maxCandlesPerSeries > 1_000_000) throw new RangeError('maxCandlesPerSeries должен быть целым числом от 1 до 1000000');
     this._assets = new Map();
