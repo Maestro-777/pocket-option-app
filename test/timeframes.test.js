@@ -37,8 +37,8 @@ test('excludes a forming candle unless explicitly requested', () => {
     { asset: 'EURUSD_OTC', ts: 5100, price: 1.2 },
     { asset: 'EURUSD_OTC', ts: 9900, price: 1.3 }
   ];
-  assert.equal(aggregateTicksToCandles(ticks, 'S5', { asOf: 10000 }).length, 0);
-  const partial = aggregateTicksToCandles(ticks, 'S5', { asOf: 10000, includeIncomplete: true });
+  assert.equal(aggregateTicksToCandles(ticks, 'S5', { asOf: 9999 }).length, 0);
+  const partial = aggregateTicksToCandles(ticks, 'S5', { asOf: 9999, includeIncomplete: true });
   assert.equal(partial.length, 1);
   assert.equal(partial[0].complete, false);
 });
