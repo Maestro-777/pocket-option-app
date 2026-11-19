@@ -15,7 +15,7 @@
 - [x] Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса и модульный менеджер.
 - [x] По исходникам 3.6.0 установлено: бинарные Socket.IO payload декодируются как UTF-8 JSON; updateStream/quotes/stream несут тики, в том числе нескольких активов.
 - [x] Локально на Node.js 22.16.0: `node --test` — 32 теста пройдены, 0 ошибок (временная локальная копия исходников).
-- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder, CDP capture adapter и SQLite MarketDataStore.
+- [x] Unit-тесты AssetCatalog, CandleSeries, MarketDataHub, Socket.IO decoder, исторического OHLC parser, CDP capture adapter и SQLite MarketDataStore.
 - [x] Проверка перезапуска/восстановления SQLite, транзакционного upsert, диапазонных запросов, schema version, dirty revision acknowledgement и backpressure.
 - [ ] Electron runtime smoke test (`npm run test:electron`) — ожидает результата Windows CI.
 - [x] OTC-фильтр: проверка явного OTC, normal assets, неизвестных символов и неоднозначных alias.
