@@ -37,7 +37,7 @@ class SignalScheduler{
   if(!marketData||typeof marketData.listAssets!=='function'||typeof marketData.getCandles!=='function')throw new TypeError('Не передан MarketDataService');
   if(!exampleStore||typeof exampleStore.list!=='function')throw new TypeError('Не передан ExampleStore');
   this.marketData=marketData;this.exampleStore=exampleStore;this.journal=journal||null;this.getConfig=typeof getConfig==='function'?getConfig:()=>({});this.onDecision=typeof onDecision==='function'?onDecision:()=>{};this.onError=typeof onError==='function'?onError:()=>{};
-  this.timer=null;this.scanning=false;this.lastScanned=new Map();this.lastScanAt=null;this.lastError=null;this.lastSummary={scanned:0,signals:0};
+  this.timer=null;this.scanning=false;this.lastScanned=new Map();this.lastScanAt=null;this.lastError=null;this.lastSummary={scanned:0,signals:0};this.recentDecisions=[];
  }
  start(){if(this.timer)return false;const config=normalizeSchedulerConfig(this.getConfig());this.timer=setInterval(()=>this.scan().catch(error=>{this.lastError=String(error.message||error);this.onError(error);}),config.scanIntervalMs);this.scan().catch(error=>{this.lastError=String(error.message||error);this.onError(error);});return true;}
  stop(){if(!this.timer)return false;clearInterval(this.timer);this.timer=null;return true;}
@@ -83,11 +83,12 @@ class SignalScheduler{
    const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
    const allDecisions=decisions.map(item=>rankedById.get(item.signalId)||{...item,rank:null,withinConfiguredLimit:false});
    const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),allDecisions,topCandidateSignalIds:selected,at:new Date().toISOString()};
-   this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};
+   this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};this.recentDecisions=allDecisions.concat(this.recentDecisions).slice(0,200);
    for(const item of allDecisions){try{this.onDecision(item);}catch(error){this.onError(error);}}
    return result;
   }finally{this.scanning=false;}
  }
+ getRecentDecisions(){return this.recentDecisions.map(item=>JSON.parse(JSON.stringify(item)));}
  getStatus(){return Object.freeze({running:!!this.timer,scanning:this.scanning,lastScanAt:this.lastScanAt,lastError:this.lastError,...this.lastSummary,trackedBars:this.lastScanned.size});}
 }
 module.exports={SignalScheduler,DEFAULT_TIMEFRAMES,normalizeSchedulerConfig,candidateMetrics,rankCandidates};
