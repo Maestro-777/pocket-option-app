@@ -44,7 +44,7 @@ test('normalizes successcloseOrder results and balance without duplicating page-
   const results = normalizeTradeResults('successcloseOrder', {
     balance: 105.5,
     deals: [
-      { id: 123, asset: 'EURUSD_otc', timeframe: 'S5', direction: 'call', amount: 5, profit: 4.5, percentProfit: 90 },
+      { id: 123, asset: 'EURUSD_otc', timeframe: 'S5', direction: 'call', amount: 5, profit: 4.5, percentProfit: 90, closeTime: 1699999999 },
       { ticket: 't-2', amount: 2, profit: 0 }
     ]
   }, 1700000000000);
@@ -53,6 +53,7 @@ test('normalizes successcloseOrder results and balance without duplicating page-
     { id: results[0].brokerTradeId, asset: results[0].asset, timeframe: results[0].timeframe, direction: results[0].direction, amount: results[0].amount, profit: results[0].profit, result: results[0].result, balance: results[0].balanceAfter },
     { id: '123', asset: 'EURUSD_otc', timeframe: 'S5', direction: 'UP', amount: 5, profit: 4.5, result: 'WIN', balance: 105.5 }
   );
+  assert.equal(results[0].closedAt, 1699999999000);
   assert.equal(results[1].profit, -2);
   assert.equal(results[1].result, 'LOSS');
   assert.deepEqual(normalizeTradeResults('orders/closed/list', [{ id: 1, profit: 5 }]), []);
