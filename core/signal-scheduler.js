@@ -72,7 +72,7 @@ class SignalScheduler{
    }
    const ranked=rankCandidates(candidates);
    const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId);
-   const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,selectedForExecution:selected.includes(x.signalId)})),selectedSignalIds:selected,at:new Date().toISOString()};
+   const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),topCandidateSignalIds:selected,at:new Date().toISOString()};
    this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};
    for(const item of result.signals)this.onDecision(item);
    return result;
