@@ -56,6 +56,13 @@
     </section>
     <section class="analysis-panel">
       <div class="panel-title"><div><p class="eyebrow">PATTERN MATCHING</p><h2>Поиск похожих ситуаций</h2></div></div>
+      <div class="analysis-options">
+        <label>Лучших сравнений<input id="analysis-topk" type="number" min="1" max="100" value="10"></label>
+        <label>Порог сходства, %<input id="analysis-threshold" type="number" min="0" max="100" step="1" value="80"></label>
+        <label>Минимум примеров<input id="analysis-min-examples" type="number" min="1" max="100" value="3"></label>
+        <label>Голосов за направление<input id="analysis-min-votes" type="number" min="1" max="100" value="6"></label>
+        <label>Свечей до входа<input id="analysis-lookback" type="number" min="3" max="300" value="30"></label>
+      </div>
       <button id="run-analysis" class="button primary" type="button">Найти совпадения</button>
       <button id="run-backtest" class="button secondary" type="button">Проверить на исторических примерах</button>
       <div id="backtest-summary" class="analysis-summary">Хронологическая проверка оценивает сигналы только по примерам, размеченным раньше проверяемой ситуации.</div>
