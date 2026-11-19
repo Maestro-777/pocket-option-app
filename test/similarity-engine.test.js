@@ -112,10 +112,13 @@ test('refuses unfinished or future candles in the live query', () => {
 });
 
 test('walk-forward evaluation uses only strictly earlier examples and reports coverage', () => {
-  const examples = Array.from({ length: 8 }, (_, i) => ({
-    ...example('wf-' + i, 'UP', i === 7 ? 'LOSS' : 'WIN'),
-    entryAt: 155000 + i * 120000
-  }));
+  const examples = Array.from({ length: 8 }, (_, i) => {
+    const entryAt = 155000 + i * 120000;
+    return {
+      ...example('wf-' + i, 'UP', i === 7 ? 'LOSS' : 'WIN'),
+      entryAt, segmentEnd: entryAt
+    };
+  });
   const report = evaluateWalkForward(examples, { topK: 10, minExamples: 3, minDirectionVotes: 6, lookback: 30, minSimilarity: 80 });
   assert.equal(report.evaluated, 8);
   assert.equal(report.signals, 2);
