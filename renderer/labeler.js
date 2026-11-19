@@ -365,6 +365,69 @@ async function loadExamples() {
   }
 }
 
+function renderAnalysis(result) {
+  const summary = $('analysis-summary');
+  const list = $('analysis-matches');
+  list.replaceChildren();
+  if (!result) { summary.textContent = 'Результат анализа отсутствует.'; return; }
+  const directionLabel = result.direction === 'UP' ? 'ВВЕРХ' : result.direction === 'DOWN' ? 'ВНИЗ' : 'НЕТ СИГНАЛА';
+  const parts = [
+    directionLabel,
+    'Совпадений ≥ порога: ' + result.qualifiedMatches.length,
+    'Голоса: ВВЕРХ ' + result.votes.UP + ' / ВНИЗ ' + result.votes.DOWN,
+    'Среднее сходство: ' + (result.averageSimilarity == null ? '—' : result.averageSimilarity.toFixed(2) + '%')
+  ];
+  if (result.historical) {
+    parts.push('Историческая результативность: ' + (result.historical.winRate == null ? 'недостаточно данных' : result.historical.winRate.toFixed(2) + '%') +
+      ' (' + result.historical.wins + ' выигр. / ' + result.historical.losses + ' проигр.)');
+  }
+  summary.textContent = parts.join(' · ') + (result.reason ? ' · Причина: ' + result.reason : '');
+  for (const match of result.matches || []) {
+    const card = document.createElement('article');
+    card.className = 'analysis-match';
+    const head = document.createElement('div');
+    head.className = 'analysis-match-head';
+    const title = document.createElement('span');
+    title.textContent = match.asset + ' · ' + match.direction;
+    const score = document.createElement('span');
+    score.className = 'analysis-score';
+    score.textContent = match.similarity.toFixed(2) + '%' + (match.similarity >= result.options.minSimilarity ? ' · подходит' : ' · ниже порога');
+    head.append(title, score);
+    const meta = document.createElement('div');
+    meta.className = 'analysis-match-meta';
+    meta.textContent = 'Экспирация ' + (match.expirySeconds || '—') + ' сек. · Результат: ' + (OUTCOMES[match.outcome] || 'Неизвестно') + ' · Вход: ' + fmtTime(match.entryAt);
+    card.append(head, meta);
+    list.append(card);
+  }
+  if (!result.matches?.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = result.reason === 'insufficient_live_history'
+      ? 'Недостаточно закрытых свечей для анализа. Накопите историю на выбранной паре и таймфрейме.'
+      : 'Нет подходящих исторических примеров для этого таймфрейма.';
+    list.append(empty);
+  }
+}
+
+async function runSimilarityAnalysis() {
+  const button = $('run-analysis');
+  if (!selectedAsset()) { setStatus('Сначала выберите OTC-пару', true); return; }
+  button.disabled = true;
+  button.textContent = 'Анализ…';
+  try {
+    const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), {});
+    renderAnalysis(result);
+    setStatus(result.status === 'SIGNAL' ? 'Найдено направление: ' + (result.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : 'Совпадения проверены: сигнала нет');
+  } catch (error) {
+    renderAnalysis(null);
+    $('analysis-summary').textContent = error.message;
+    setStatus('Ошибка анализа', true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Найти совпадения';
+  }
+}
+
 async function reloadAll() {
   await loadAssets();
   await loadChart();
@@ -380,6 +443,7 @@ $('clear-marks').addEventListener('click', () => {
   setMarkMode(null); updateMarkSummary();
 });
 $('save-example').addEventListener('click', saveExample);
+$('run-analysis').addEventListener('click', runSimilarityAnalysis);
 $('cancel-edit').addEventListener('click', resetForm);
 $('reload-chart').addEventListener('click', loadChart);
 $('refresh-all').addEventListener('click', reloadAll);
