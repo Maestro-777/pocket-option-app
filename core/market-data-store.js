@@ -709,13 +709,24 @@ class MarketDataStore {
       return [...groups.entries()].map(([key, items]) => ({ key, ...summarize(items) }))
         .sort((a, b) => b.netProfit - a.netProfit || b.total - a.total || String(a.key).localeCompare(String(b.key)));
     };
+    const chronological = records.slice().sort((a, b) => a.closedAt - b.closedAt || a.createdAt - b.createdAt);
+    const cumulativeByAccount = new Map();
+    const profitCurve = [];
+    const balanceHistory = [];
+    for (const item of chronological) {
+      const cumulative = (cumulativeByAccount.get(item.accountMode) || 0) + item.profit;
+      cumulativeByAccount.set(item.accountMode, cumulative);
+      profitCurve.push({ closedAt: item.closedAt, accountMode: item.accountMode, cumulativeProfit: cumulative });
+      if (item.balanceAfter != null) balanceHistory.push({ closedAt: item.closedAt, accountMode: item.accountMode, balance: item.balanceAfter });
+    }
     return {
       generatedAt: Date.now(), overall: summarize(records),
       byAsset: groupBy(item => item.asset || 'UNKNOWN'),
       byTimeframe: groupBy(item => item.timeframe || 'UNKNOWN'),
       byDirection: groupBy(item => item.direction || 'UNKNOWN'),
       byAccountMode: groupBy(item => item.accountMode),
-      byExpiry: groupBy(item => item.expirySeconds == null ? 'UNKNOWN' : String(item.expirySeconds))
+      byExpiry: groupBy(item => item.expirySeconds == null ? 'UNKNOWN' : String(item.expirySeconds)),
+      profitCurve, balanceHistory
     };
   }
 
