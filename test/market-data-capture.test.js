@@ -33,6 +33,25 @@ test('attaches CDP Network domain and ingests a WebSocket tick', async () => {
   assert.equal(debuggerApi.isAttached(), false);
 });
 
+test('forwards confirmed broker trade results from WebSocket frames', async () => {
+  const debuggerApi = new FakeDebugger();
+  const received = [];
+  const capture = new MarketDataCapture({
+    debuggerApi, marketDataHub: new MarketDataHub({ timeframes: ['S5'] }),
+    onTradeResult: item => received.push(item)
+  });
+  await capture.attach();
+  debuggerApi.created('trade-socket');
+  debuggerApi.frame('trade-socket', '42["successcloseOrder",{"balance":105,"deals":[{"id":77,"amount":5,"profit":4.5}]}]');
+  assert.equal(received.length, 1);
+  assert.equal(received[0].brokerTradeId, '77');
+  assert.equal(received[0].result, 'WIN');
+  assert.equal(received[0].profit, 4.5);
+  assert.equal(received[0].balanceAfter, 105);
+  assert.equal(capture.getStatus().receivedTradeResults, 1);
+  capture.close();
+});
+
 test('keeps binary attachment state isolated per WebSocket', async () => {
   const debuggerApi = new FakeDebugger(), hub = new MarketDataHub({ timeframes: ['S5'] });
   const capture = new MarketDataCapture({ debuggerApi, marketDataHub: hub });
