@@ -154,5 +154,7 @@ test('validates configurable thresholds and refuses unsupported timeframes', () 
   assert.equal(validateOptions().minSimilarity, 80);
   assert.throws(() => validateOptions({ topK: 0 }), /topK/);
   assert.throws(() => validateOptions({ topK: 5, minDirectionVotes: 6 }), /minDirectionVotes/);
+  assert.throws(() => validateOptions({ analysisTimeframes: [] }), /непустым массивом/);
+  assert.throws(() => validateOptions({ analysisTimeframes: ['M4'] }), /неподдерживаемый таймфрейм/);
   assert.throws(() => analyzeSimilarity({ timeframe: 'M4', entryAt: 100000, candles: [], examples: [] }), /Неподдерживаемый таймфрейм/);
 });
