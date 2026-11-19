@@ -9,7 +9,7 @@ class TradeExecutionAdapter{
   this.getAccount=typeof getAccount==='function'?getAccount:()=>({});
   this.getSiteWindow=typeof getSiteWindow==='function'?getSiteWindow:()=>null;
   this.onUpdate=typeof onUpdate==='function'?onUpdate:()=>{};
-  this.submitted=new Map();
+  this.submitted=new Map();this.executionQueue=Promise.resolve();this.correlationVerified=false;
  }
  async _journal(type,payload,snapshot={}){if(this.journal)await this.journal.append(type,payload,snapshot);}
  async _reject(signal,reason,details={}){
@@ -17,7 +17,8 @@ class TradeExecutionAdapter{
   try{await this._journal('TRADE_REJECTED',record,{autoTradingEnabled:this.getSettings().autoTradingEnabled===true});}catch(_){}
   this.onUpdate({type:'rejected',...record});return{ok:false,reason,details};
  }
- async execute(signal){
+ execute(signal){const task=this.executionQueue.then(()=>this._execute(signal));this.executionQueue=task.catch(()=>{});return task;}
+ async _execute(signal){
   if(!signal||typeof signal!=='object'||!signal.decision||signal.decision.accepted!==true)return this._reject(signal,'invalid_or_unconfirmed_signal');
   const settings=this.getSettings()||{},account=this.getAccount()||{};
   if(settings.autoTradingEnabled!==true)return this._reject(signal,'auto_trading_disabled');
@@ -30,6 +31,8 @@ class TradeExecutionAdapter{
   if(!Number.isFinite(amount)||amount<=0||amount>100000||!Number.isFinite(balance)||balance<=0||amount>balance)return this._reject(signal,'invalid_amount_or_insufficient_demo_balance',{amount,balance});
   if(!Number.isInteger(expirySeconds)||expirySeconds<1||expirySeconds>86400)return this._reject(signal,'invalid_expiration',{expirySeconds});
   const maxOpenTrades=Number(settings.analysisConfig&&settings.analysisConfig.maxOpenTrades||1);
+  if(Array.from(this.submitted.values()).some(x=>x.pair===asset))return this._reject(signal,'pair_has_unresolved_trade');
+  if(maxOpenTrades>1&&this.submitted.size>0&&!this.correlationVerified)return this._reject(signal,'multi_trade_correlation_not_verified');
   const reservation=await this.gate.reserve({signalId:signal.signalId,pair:asset,timeframe:signal.timeframe,direction:signal.decision.direction},{maxOpenTrades});
   if(!reservation.accepted)return this._reject(signal,reservation.reason);
   const win=this.getSiteWindow();
@@ -78,6 +81,7 @@ class TradeExecutionAdapter{
    const trade=candidates[0],profit=Number(deal.profit??deal.netProfit??0);
    if(!Number.isFinite(profit)){results.push({matched:false,reason:'invalid_profit',tradeId:trade.tradeId});continue;}
    const outcome=profit>0?'WIN':profit<0?'LOSS':'DRAW';
+   if(asset)this.correlationVerified=true;
    const closed=await this.gate.closeTrade(trade.tradeId,{outcome});
    if(this.ledger)await this.ledger.closeTrade(trade.tradeId,{profit,outcome,closedAt:Date.now(),platformDealId:String(deal.id??deal.ticket??'')}).catch(error=>this.onUpdate({type:'ledger_error',tradeId:trade.tradeId,message:String(error.message||error)}));
    this.submitted.delete(trade.tradeId);
@@ -88,6 +92,6 @@ class TradeExecutionAdapter{
   return results;
  }
  restore(records=[]){for(const record of records){if(!record||!['PREPARING','SUBMITTED_UNCONFIRMED','UNKNOWN_AFTER_RESTART'].includes(record.status))continue;this.submitted.set(String(record.tradeId),{...record});}return this.getState();}
- getState(){return{pendingOrSubmitted:this.submitted.size,trades:Array.from(this.submitted.values()).map(x=>({...x})),ledger:this.ledger?this.ledger.getStatus():null};}
+ getState(){return{pendingOrSubmitted:this.submitted.size,correlationVerified:this.correlationVerified,trades:Array.from(this.submitted.values()).map(x=>({...x})),ledger:this.ledger?this.ledger.getStatus():null};}
 }
 module.exports={TradeExecutionAdapter};
