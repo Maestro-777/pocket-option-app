@@ -7,7 +7,7 @@ class ScanStateStore{
  _validate(input){
   if(!input||typeof input!=='object'||Array.isArray(input))throw new TypeError('scan state должен быть объектом');
   const entries=input instanceof Map?Array.from(input.entries()):Object.entries(input);if(entries.length>MAX_KEYS)throw new RangeError('Слишком много ключей scan state');
-  const result={};for(const[key,value]of entries){const parts=String(key).split('|'),asset=parts[0],timeframe=parts[1],ts=Number(value);if(parts.length!==2||!asset||asset.length>64||!Object.prototype.hasOwnProperty.call(TIMEFRAME_MS,timeframe)||!Number.isFinite(ts)||ts<=0)continue;result[asset+'|'+timeframe]=ts;}
+  const result={};for(const[key,value]of entries){const parts=String(key).split('|'),asset=parts[0],timeframe=parts[1],ts=Number(value);if(parts.length!==2||!asset||asset.length>64||!Object.prototype.hasOwnProperty.call(TIMEFRAME_MS,timeframe))continue;if(!Number.isFinite(ts)||ts<=0)throw new TypeError('Некорректное значение scan state');result[asset+'|'+timeframe]=ts;}
   return result;
  }
  async load(){
