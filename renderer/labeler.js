@@ -487,6 +487,7 @@ async function runSimilarityBacktest() {
   button.textContent = 'Проверка…';
   try {
     const options = readAnalysisOptions();
+    currentLookback = options.lookback;
     await api.saveAnalysisSettings(options);
     const report = await api.evaluateSimilarityBacktest(selectedTimeframe(), options);
     const accuracy = report.accuracy == null ? 'недостаточно сигналов' : report.accuracy.toFixed(2) + '%';
