@@ -755,6 +755,7 @@ $('clear-marks').addEventListener('click', () => {
 $('save-example').addEventListener('click', saveExample);
 $('run-analysis').addEventListener('click', runSimilarityAnalysis);
 $('run-backtest').addEventListener('click', runSimilarityBacktest);
+$('trade-period').addEventListener('change', loadTradeStatistics);
 document.querySelectorAll('.analysis-timeframe').forEach(input => {
   input.addEventListener('change', async () => {
     try {
