@@ -8,7 +8,7 @@ const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
 const { MarketDataHub } = require('./core/market-data');
-const { PocketOptionProtocol } = require('./core/pocketoption-protocol');
+const MarketDataCapture = require('./core/market-data-capture');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -40,8 +40,7 @@ let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
 let marketDataHub = null;
-let marketProtocols = new Map();
-let marketCapture = { status: 'idle', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
+let marketDataCapture = null;
 let marketStatusPublishTimer = null;
 let settings = {
   showMiniWidget: false,
@@ -152,94 +151,24 @@ function scheduleMarketStatusPublish() {
 }
 
 function attachMarketDataCapture(win) {
-  const debuggerApi = win.webContents.debugger;
   marketDataHub = new MarketDataHub();
-  marketProtocols = new Map();
-  marketCapture = { status: 'attaching', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
-
-  debuggerApi.on('message', (_event, method, params) => {
-    if (method === 'Network.webSocketCreated') {
-      const requestId = String(params?.requestId || '');
-      if (requestId && marketProtocols.size < 32 && !marketProtocols.has(requestId)) {
-        marketProtocols.set(requestId, new PocketOptionProtocol());
-      }
-      return;
-    }
-    if (method === 'Network.webSocketClosed') {
-      marketProtocols.delete(String(params?.requestId || ''));
-      scheduleMarketStatusPublish();
-      return;
-    }
-    if (method !== 'Network.webSocketFrameReceived') return;
-
-    const requestId = String(params?.requestId || '');
-    const frame = params?.response;
-    if (!requestId || !frame || typeof frame.payloadData !== 'string') return;
-    let decoder = marketProtocols.get(requestId);
-    if (!decoder) {
-      if (marketProtocols.size >= 32) return;
-      decoder = new PocketOptionProtocol();
-      marketProtocols.set(requestId, decoder);
-    }
-
-    marketCapture.lastFrameAt = Date.now();
-    const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
-    if (decoded?.ticks?.length) {
-      for (const tick of decoded.ticks) {
-        const result = marketDataHub.ingest(tick);
-        if (result.accepted) marketCapture.lastTickAt = tick.ts;
-      }
-      scheduleMarketStatusPublish();
-    }
+  marketDataCapture = new MarketDataCapture({
+    debuggerApi: win.webContents.debugger,
+    marketDataHub,
+    log,
+    onStatus: scheduleMarketStatusPublish
   });
-
-  debuggerApi.on('detach', (_event, reason) => {
-    marketProtocols.clear();
-    marketCapture = {
-      status: 'detached', attached: false, lastFrameAt: marketCapture.lastFrameAt,
-      lastTickAt: marketCapture.lastTickAt, lastError: String(reason || 'Debugger detached')
-    };
-    log('warn', 'Захват WebSocket Pocket Option остановлен', { reason: marketCapture.lastError });
-    scheduleMarketStatusPublish();
-  });
-
-  try {
-    if (debuggerApi.isAttached()) {
-      marketCapture = { ...marketCapture, status: 'unavailable', lastError: 'К этому окну уже подключён отладчик Chromium' };
-      log('warn', 'Не удалось включить сбор рыночных данных: Chromium debugger уже занят');
-      return;
-    }
-    debuggerApi.attach('1.3');
-    marketCapture.attached = true;
-    marketCapture.status = 'attached';
-    debuggerApi.sendCommand('Network.enable').then(() => {
-      if (!win.isDestroyed()) {
-        marketCapture.status = 'listening';
-        log('info', 'Захват WebSocket Pocket Option включён через Chromium DevTools Protocol');
-        scheduleMarketStatusPublish();
-      }
-    }).catch(error => {
-      marketCapture.status = 'error';
-      marketCapture.lastError = String(error);
-      log('error', 'Не удалось включить Network domain для рыночных данных', marketCapture.lastError);
-      scheduleMarketStatusPublish();
-    });
-  } catch (error) {
-    marketCapture.status = 'error';
-    marketCapture.lastError = String(error);
-    log('error', 'Не удалось подключить Chromium debugger для рыночных данных', marketCapture.lastError);
-  }
+  marketDataCapture.attach().catch(error => log('error', 'Ошибка запуска захвата рыночных данных', String(error)));
 }
 
 function getMarketDataStatus() {
-  const protocolStats = { textFrames: 0, binaryFrames: 0, malformedFrames: 0, events: 0, ticks: 0 };
-  for (const decoder of marketProtocols.values()) {
-    for (const key of Object.keys(protocolStats)) protocolStats[key] += decoder.stats[key];
-  }
   return {
-    capture: { ...marketCapture, activeSockets: marketProtocols.size },
-    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0 },
-    protocol: protocolStats
+    capture: marketDataCapture ? marketDataCapture.getStatus() : {
+      status: 'stopped', attached: false, activeSockets: 0, lastFrameAt: null,
+      lastTickAt: null, lastTickReceivedAt: null, lastError: null, rejectedTicks: 0,
+      protocol: { textFrames: 0, binaryFrames: 0, malformedFrames: 0, events: 0, ticks: 0 }
+    },
+    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0 }
   };
 }
 
@@ -278,9 +207,9 @@ function launchSite() {
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('closed', () => {
-    marketProtocols.clear();
+    if (marketDataCapture) marketDataCapture.close();
+    marketDataCapture = null;
     marketDataHub = null;
-    marketCapture = { status: 'stopped', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
     siteWindow = null; refreshTrayMenu(); publishStatus();
   });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -535,8 +464,8 @@ async function runFullCheck(source) {
     checks.push({ name: 'Баланс и режим', ok: !!lastBalance && Date.now() - lastBalance.ts < 15000, detail: lastBalance ? lastBalance.accountType.toUpperCase() + ' / ' + Math.round((Date.now() - lastBalance.ts) / 1000) + ' сек. назад' : 'Нет подтверждённых данных адаптера' });
     const bridge = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true).catch(() => null);
     checks.push({ name: 'Адаптер Pocket Option', ok: !!bridge, detail: bridge ? 'Активен' : 'Не обнаружен' });
-    const captureReady = marketCapture.status === 'listening';
-    checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketCapture.lastError || marketCapture.status) });
+    const captureReady = marketDataCapture?.status === 'listening';
+    checks.push({ name: 'Захват WebSocket рыночных данных', ok: captureReady, state: captureReady ? 'connected' : 'not-connected', detail: captureReady ? 'CDP слушает WebSocket; получено тиков: ' + (marketDataHub?.getHealth().acceptedTicks || 0) : 'Сбор не активен: ' + (marketDataCapture?.lastError || marketDataCapture?.status || 'stopped') });
   } else checks.push({ name: 'Окно сайта', ok: true, detail: 'Не запускалось — это допустимо' });
   if (moduleManager) {
     const moduleChecks = await moduleManager.healthChecks();
@@ -552,6 +481,7 @@ async function runFullCheck(source) {
 app.on('before-quit', () => {
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
   if (marketStatusPublishTimer) clearTimeout(marketStatusPublishTimer);
+  if (marketDataCapture) marketDataCapture.close();
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
