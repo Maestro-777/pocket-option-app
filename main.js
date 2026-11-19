@@ -428,7 +428,8 @@ ipcMain.on('site:balance', (event, payload) => {
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
 ipcMain.handle('app:market:assets', event => {
   if (!isTrustedDataWindowSender(event)) return [];
-  if (marketDataCapture) return marketDataCapture.assetCatalog.listOTC();
+  const liveAssets = marketDataCapture ? marketDataCapture.assetCatalog.listOTC() : [];
+  if (liveAssets.length) return liveAssets;
   return marketDataStore ? marketDataStore.listCatalog({ otcOnly: true }) : [];
 });
 ipcMain.handle('app:market:candles', (event, asset, timeframe, options = {}) => {
