@@ -73,3 +73,10 @@ textarea{resize:vertical}
 .analysis-timeframes-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
 .analysis-timeframes-grid label{display:flex;flex-direction:row;align-items:center;gap:4px;font-size:11px;color:#b8c9e3}
 .analysis-timeframes-grid input{accent-color:var(--blue);margin:0}
+
+.live-signals{display:flex;flex-direction:column;gap:6px;max-height:28vh;overflow:auto}
+.live-signal{display:grid;grid-template-columns:24px 1fr auto;gap:8px;align-items:center;background:#0e1728;border:1px solid #263650;border-radius:7px;padding:8px}
+.live-signal-rank{font-size:12px;font-weight:750;color:#9fc6ff}
+.live-signal-main{font-size:11px;color:#d7e2f3}
+.live-signal-meta{font-size:10px;color:#92a4bd;margin-top:3px}
+.live-signal-score{font-size:12px;font-weight:700;color:#a9d7bd}
