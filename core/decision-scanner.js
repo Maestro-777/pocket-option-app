@@ -92,8 +92,15 @@ class DecisionScanner {
     if (cached && cached.key === cacheKey) return cached.prepared;
     const examples = this.marketDataStore.listManualExamples({ timeframe, limit: config.maxExamples });
     const prepared = prepareExamples(examples, timeframe, config);
-    const revisionSource = examples.map(example => String(example.id || '') + ':' + String(example.updatedAt || '')).join('|');
-    const revision = crypto.createHash('sha256').update(revisionSource).digest('hex');
+    const revisionHash = crypto.createHash('sha256');
+    for (const item of prepared.items) {
+      revisionHash.update([
+        item.id, item.asset, item.timeframe, item.direction, item.similarityOutcome,
+        item.entryAt, item.outcomeKnownAt, item.expirySeconds
+      ].join('|'));
+      for (const row of item.features) revisionHash.update(row.map(value => value.toFixed(8)).join(','));
+    }
+    const revision = revisionHash.digest('hex');
     const value = { ...prepared, revision };
     this._examples.set(timeframe, { key: cacheKey, prepared: value });
     return value;
