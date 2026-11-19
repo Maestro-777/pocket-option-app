@@ -256,4 +256,4 @@ class PocketOptionProtocol {
   _malformed() { this.stats.malformedFrames++; return null; }
 }
 
-module.exports = { PocketOptionProtocol, normalizeStreamTicks, normalizeHistoryCandles, detectHistoryOhlcLayout, toMilliseconds };
+module.exports = { PocketOptionProtocol, normalizeStreamTicks, normalizeTradeResults, normalizeHistoryCandles, detectHistoryOhlcLayout, toMilliseconds };
