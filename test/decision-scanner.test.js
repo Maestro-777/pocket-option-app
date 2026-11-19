@@ -38,7 +38,7 @@ function fixture() {
   };
   const store = {
     listManualExamples: () => [sample],
-    listAnalysisDecisions: () => [],
+    listAnalysisDecisions: () => decisions.length ? [decisions[decisions.length - 1]] : [],
     createAnalysisDecision: value => { decisions.push(value); return value; }
   };
   const settings = {
@@ -71,6 +71,30 @@ test('does not write duplicate decisions for the same completed candle', async (
   scanner.enqueue('EURUSD_OTC');
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.equal(decisions.length, 1);
+  scanner.close();
+});
+
+test('re-scans a closed candle when a late tick corrects its OHLC snapshot', async () => {
+  const { scanner, decisions, live } = fixture();
+  scanner.enqueue('EURUSD_OTC');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  live[2].close += 0.0002;
+  live[2].high = Math.max(live[2].high, live[2].close);
+  live[2].tickCount++;
+  scanner.enqueue('EURUSD_OTC');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(decisions.length, 2);
+  scanner.close();
+});
+
+test('re-scans the same candle after the example dataset is invalidated', async () => {
+  const { scanner, decisions } = fixture();
+  scanner.enqueue('EURUSD_OTC');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  scanner.invalidateExamples();
+  scanner.enqueue('EURUSD_OTC');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.equal(decisions.length, 2);
   scanner.close();
 });
 
