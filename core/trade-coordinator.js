@@ -13,7 +13,9 @@ function signalKey(signal) {
       !['UP', 'DOWN'].includes(direction) || !Number.isSafeInteger(barStartAt) || barStartAt <= 0) {
     throw new TypeError('Сигнал не содержит валидную OTC-пару, таймфрейм, направление и время свечи');
   }
-  return [asset, timeframe, barStartAt, direction].join('|');
+  // One market bar is one entry opportunity; a late direction revision must not
+  // permit a second, opposite-side entry for the same pair/timeframe/bar.
+  return [asset, timeframe, barStartAt].join('|');
 }
 
 /**
