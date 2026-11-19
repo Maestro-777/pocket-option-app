@@ -84,7 +84,7 @@ function renderMarketData(status, assets) {
     ' · Отклонено: ' + (status.stats?.rejected ?? 0) +
     ' · Последний тик: ' + last +
     ' · Таймфреймы: ' + (status.supportedTimeframes || []).join(', ') +
-    ' · Захват: ' + (status.capture ? (status.capture.status === 'listening' ? 'CDP WebSocket (' + status.capture.activeSockets + ' соединений)' : 'CDP ' + status.capture.status) : 'page bridge fallback');
+    ' · Захват: ' + (status.capture ? (status.capture.status === 'listening' ? 'CDP WebSocket (' + status.capture.activeSockets + ' соединений, отклонено OTC/alias: ' + (status.capture.rejectedAmbiguousAssets || 0) + '/' + (status.capture.rejectedUnknownAssets || 0) + ')' : 'CDP ' + status.capture.status) : 'page bridge fallback');
   const rows = Array.isArray(assets) ? assets : [];
   $('market-assets-list').innerHTML = rows.map(asset =>
     '<div class="log-entry"><span class="level">' + (asset.otc ? 'OTC' : '—') + '</span><b>' +
