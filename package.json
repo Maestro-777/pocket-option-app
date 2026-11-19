@@ -1,6 +1,6 @@
 {
   "name": "pocket-option-background",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Standalone Pocket Option background desktop controller",
   "main": "main.js",
@@ -55,7 +55,7 @@
       {
         "provider": "github",
         "owner": "Maestro-777",
-        "repo": "pocket-tracker"
+        "repo": "pocket-option-app"
       }
     ]
   }
