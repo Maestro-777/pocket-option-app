@@ -90,3 +90,16 @@ test('uses receive time for documented live tick shapes without timestamps', () 
   assert.equal(ticks.length, 3);
   assert.ok(ticks.every(tick => tick.ts === receivedAt));
 });
+
+test('normalizes numeric broker timeframe and creates stable trade result identity', () => {
+  const results = normalizeTradeResults('successcloseOrder', {
+    deals: [
+      { id: 'abc-1', asset: 'EURUSD_otc', period: 5, direction: 'put', amount: 2, profit: 1.7 },
+      { id: 'missing-amount', asset: 'EURUSD_otc', period: 5, profit: 1.7 }
+    ]
+  }, 1700000000000);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].timeframe, 'S5');
+  assert.equal(results[0].direction, 'DOWN');
+  assert.equal(results[0].eventKey, 'broker:abc-1');
+});
