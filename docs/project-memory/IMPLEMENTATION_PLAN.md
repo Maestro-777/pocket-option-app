@@ -10,7 +10,8 @@
 - [x] Подтвердить Windows CI syntax check, 15 unit-тестов и NSIS x64 build.
 - [ ] Установить и вручную запустить собранное приложение на пользовательской Windows 11.
 - [x] Добавить unit-тесты агрегатора таймфреймов и Market Data adapter.
-- [ ] Добавить отдельные IPC tests для sender/origin, частоты и границ payload.
+- [x] Добавить unit-тесты URL allow-list, частоты и границ IPC payload.
+- [ ] Добавить интеграционные IPC tests для проверки sender/webContents/frame в Electron.
 
 ## Этап 1. Исследование рыночного потока
 - [x] Проследить по исходникам 3.6.0 события updateAssets, updateStream, quotes/stream и события истории; зафиксировать форматы payload.
