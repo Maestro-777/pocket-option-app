@@ -111,6 +111,10 @@ function renderCheck(result) {
   ).join('');
 }
 
+$('open-labeler').addEventListener('click', async () => {
+  const result = await api.openLabeler();
+  if (!result?.ok) toast(result?.reason || 'Не удалось открыть окно разметки');
+});
 $('launch-site').addEventListener('click', async () => {
   const status = await api.getStatus();
   if (status.site.running) await api.showSite(); else await api.launchSite();
