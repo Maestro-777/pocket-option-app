@@ -266,5 +266,6 @@ test('automatically keeps the configured rolling candle count per series on upse
   assert.deepEqual(store.getCandles('EURUSD_OTC', 'S5').map(row => row.startAt), [20000, 25000]);
   assert.deepEqual(store.getCandles('GBPUSD_OTC', 'S5').map(row => row.startAt), [10000, 15000]);
   assert.throws(() => new MarketDataStore(':memory:', { maxCandlesPerSeries: 0 }), /maxCandlesPerSeries/);
+  assert.throws(() => new MarketDataStore(':memory:', null), /options/);
   store.close();
 });
