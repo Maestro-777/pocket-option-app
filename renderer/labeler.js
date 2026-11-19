@@ -589,9 +589,12 @@ function renderTradeStatistics(statistics, recent) {
   summaryRoot.replaceChildren();
   const latestBalances = new Map();
   for (const point of (statistics?.balanceHistory || [])) latestBalances.set(point.accountMode, point.balance);
+  const accountStats = new Map((statistics?.byAccountMode || []).map(item => [item.key, item]));
   const cards = [
     ['Закрытых сделок', String(summary.total)],
-    ['Чистый P/L', formatProfit(summary.netProfit)],
+    ['P/L всех счетов', formatProfit(summary.netProfit)],
+    ['P/L DEMO', accountStats.has('DEMO') ? formatProfit(accountStats.get('DEMO').netProfit) : 'н/д'],
+    ['P/L REAL', accountStats.has('REAL') ? formatProfit(accountStats.get('REAL').netProfit) : 'н/д'],
     ['Win rate', summary.winRate == null ? 'н/д' : summary.winRate.toFixed(1) + '%'],
     ['WIN / LOSS / DRAW', summary.wins + ' / ' + summary.losses + ' / ' + summary.draws],
     ['Валовая прибыль', formatProfit(summary.grossProfit)],
