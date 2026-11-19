@@ -440,6 +440,7 @@ async function runSimilarityAnalysis() {
     await api.saveAnalysisSettings(options);
     const result = await api.analyzeSimilarity(selectedAsset(), selectedTimeframe(), options);
     renderAnalysis(result);
+    await loadDecisionJournal();
     setStatus(result.status === 'SIGNAL' ? 'Найдено направление: ' + (result.direction === 'UP' ? 'ВВЕРХ' : 'ВНИЗ') : 'Совпадения проверены: сигнала нет');
   } catch (error) {
     renderAnalysis(null);
@@ -482,11 +483,50 @@ async function runSimilarityBacktest() {
   }
 }
 
+function renderDecisionJournal(items) {
+  const list = $('decision-journal');
+  list.replaceChildren();
+  $('decision-count').textContent = String(items.length);
+  if (!items.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty';
+    empty.textContent = 'Для выбранной пары и таймфрейма решений пока нет.';
+    list.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const details = document.createElement('details');
+    details.className = 'decision-entry';
+    const summary = document.createElement('summary');
+    const direction = item.direction === 'UP' ? 'ВВЕРХ' : item.direction === 'DOWN' ? 'ВНИЗ' : 'НЕТ СИГНАЛА';
+    summary.textContent = fmtTime(item.decisionAt) + ' · ' + item.asset + ' · ' + item.timeframe + ' · ' + direction + ' · ' + item.reason;
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(item, null, 2);
+    details.append(summary, pre);
+    list.append(details);
+  }
+}
+
+async function loadDecisionJournal() {
+  try {
+    const items = await api.getAnalysisDecisions({
+      asset: selectedAsset() || undefined,
+      timeframe: selectedTimeframe() || undefined,
+      limit: 20
+    });
+    renderDecisionJournal(items || []);
+  } catch (error) {
+    $('decision-journal').textContent = error.message;
+    setStatus('Не удалось загрузить журнал решений', true);
+  }
+}
+
 async function reloadAll() {
   await loadAnalysisSettings();
   await loadAssets();
   await loadChart();
   await loadExamples();
+  await loadDecisionJournal();
 }
 
 $('mark-start').addEventListener('click', () => setMarkMode('start'));
@@ -503,7 +543,7 @@ $('run-backtest').addEventListener('click', runSimilarityBacktest);
 $('cancel-edit').addEventListener('click', resetForm);
 $('reload-chart').addEventListener('click', loadChart);
 $('refresh-all').addEventListener('click', reloadAll);
-$('asset-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); });
+$('asset-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); await loadDecisionJournal(); });
 $('timeframe-select').addEventListener('change', async () => { resetForm(); await loadChart(); await loadExamples(); });
 $('open-site').addEventListener('click', async () => {
   const result = await api.launchSite();
