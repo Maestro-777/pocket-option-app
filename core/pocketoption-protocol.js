@@ -121,6 +121,65 @@ function normalizeStreamTicks(eventName, payload, receivedAt = Date.now()) {
  * Decoder for Pocket Option Socket.IO frames documented in pocket-tracker 3.6.0.
  * Binary payloads are UTF-8 JSON, not MessagePack.
  */
+function finiteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeTradeResults(eventName, payload, receivedAt = Date.now()) {
+  const successClose = eventName === 'successcloseOrder';
+  const legacyClose = eventName === 's_orders/close' ||
+    (typeof eventName === 'string' && eventName.includes('close') &&
+      (eventName.includes('option') || eventName.includes('deal')) && !eventName.includes('list'));
+  if (!successClose && !legacyClose) return [];
+  const closedAt = toMilliseconds(receivedAt) || Date.now();
+  const balanceValue = successClose ? finiteNumber(payload?.balance ?? payload?.wallet) : finiteNumber(payload?.balance ?? payload?.wallet);
+  let deals;
+  if (successClose) deals = Array.isArray(payload?.deals) ? payload.deals : Array.isArray(payload) ? payload : [payload];
+  else {
+    const first = Array.isArray(payload) ? payload[0] : payload;
+    deals = Array.isArray(first) ? first : [first];
+  }
+  const results = [];
+  for (const deal of deals) {
+    if (!deal || typeof deal !== 'object') continue;
+    const brokerTradeId = deal.id ?? deal.ticket ?? null;
+    const amount = finiteNumber(deal.amount ?? deal.investment ?? 1);
+    const rawProfit = finiteNumber(deal.profit ?? 0);
+    if (amount == null || amount <= 0 || rawProfit == null) continue;
+    let result, profit;
+    if (successClose) {
+      result = rawProfit > 0 ? 'WIN' : 'LOSS';
+      profit = rawProfit > 0 ? rawProfit : -amount;
+    } else {
+      const status = String(deal.status ?? deal.result ?? deal.state ?? '').toLowerCase();
+      if (status === 'draw' || status === 'equal') { result = 'DRAW'; profit = 0; }
+      else if (status === 'win' || rawProfit > 0) { result = 'WIN'; profit = rawProfit; }
+      else { result = 'LOSS'; profit = -amount; }
+    }
+    const assetRaw = deal.asset ?? deal.symbol ?? deal.active ?? deal.pair ?? null;
+    const timeframeRaw = String(deal.timeframe ?? deal.period ?? deal.interval ?? '').toUpperCase();
+    const directionRaw = String(deal.direction ?? deal.action ?? deal.type ?? '').toUpperCase();
+    const accountRaw = String(deal.accountMode ?? deal.account_type ?? payload?.accountMode ?? '').toUpperCase();
+    results.push({
+      brokerTradeId: brokerTradeId == null ? null : String(brokerTradeId),
+      asset: typeof assetRaw === 'string' ? assetRaw : null,
+      timeframe: Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, timeframeRaw) ? timeframeRaw : null,
+      direction: ['UP', 'CALL', 'BUY', 'HIGH'].includes(directionRaw) ? 'UP'
+        : ['DOWN', 'PUT', 'SELL', 'LOW'].includes(directionRaw) ? 'DOWN' : null,
+      accountMode: accountRaw.includes('DEMO') ? 'DEMO' : accountRaw.includes('REAL') ? 'REAL' : 'UNKNOWN',
+      amount, profit, result,
+      entryAt: toMilliseconds(deal.openTime ?? deal.open_time ?? deal.createdAt ?? deal.created_at),
+      closedAt,
+      expirySeconds: finiteNumber(deal.expirySeconds ?? deal.expiration ?? deal.expiry),
+      payoutRate: finiteNumber(deal.percentProfit ?? deal.payout ?? deal.payoutRate),
+      balanceAfter: balanceValue,
+      sourceEvent: eventName
+    });
+  }
+  return results;
+}
+
 class PocketOptionProtocol {
   constructor(options = {}) {
     this.maxFrameBytes = options.maxFrameBytes == null ? 2_000_000 : Number(options.maxFrameBytes);
@@ -142,8 +201,9 @@ class PocketOptionProtocol {
       }
       this.stats.events++;
       const ticks = normalizeStreamTicks(eventName, payload);
+      const tradeResults = normalizeTradeResults(eventName, payload);
       this.stats.ticks += ticks.length;
-      return { eventName, payload, ticks, pendingAttachment: false };
+      return { eventName, payload, ticks, tradeResults, pendingAttachment: false };
     }
     return this._decodeBinary(this._toBytes(frame, encoding));
   }
@@ -160,8 +220,9 @@ class PocketOptionProtocol {
     if (!eventName) return this._malformed();
     this.stats.events++;
     const ticks = normalizeStreamTicks(eventName, parsed);
+    const tradeResults = normalizeTradeResults(eventName, parsed);
     this.stats.ticks += ticks.length;
-    return { eventName, payload: parsed, ticks, pendingAttachment: false };
+    return { eventName, payload: parsed, ticks, tradeResults, pendingAttachment: false };
   }
 
   _toBytes(frame, encoding) {
