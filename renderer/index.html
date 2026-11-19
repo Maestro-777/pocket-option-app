@@ -11,6 +11,7 @@
     <nav id="nav">
       <button class="nav-item active" data-page="home"><span>⌂</span>Главная</button>
       <button class="nav-item" data-page="monitor"><span>◉</span>Мониторинг</button>
+      <button class="nav-item" data-page="market"><span>⌁</span>Рыночные данные</button>
       <button class="nav-item" data-page="logs"><span>≋</span>Журналы</button>
       <button class="nav-item" data-page="settings"><span>⚙</span>Настройки</button>
       <button class="nav-item" data-page="updates"><span>↻</span>Обновления</button>
@@ -45,6 +46,17 @@
     <section class="page" id="page-monitor">
       <div class="page-intro"><h2>Мониторинг устойчивости</h2><p>Полная проверка выполняется автоматически каждые 5 минут. Проверка сети и восстановления — чаще.</p><button class="btn primary" id="run-check">Запустить проверку сейчас</button></div>
       <div id="check-summary" class="check-summary">Ожидание первой проверки</div><div id="check-list" class="check-list"></div>
+    </section>
+    <section class="page" id="page-market">
+      <div class="page-intro row-between"><div><h2>Поток рыночных данных</h2><p>Котировки, которые Pocket Option передаёт по WebSocket для нескольких активов одновременно.</p></div><button class="btn secondary" id="refresh-market">Обновить</button></div>
+      <div class="stats-grid market-stats">
+        <article class="stat-card"><span class="stat-label">АКТИВЫ В КАТАЛОГЕ</span><div class="stat-value" id="market-assets-count">0</div><small>Все инструменты</small></article>
+        <article class="stat-card"><span class="stat-label">OTC АКТИВЫ</span><div class="stat-value" id="market-otc-count">0</div><small>Определены по символу/названию</small></article>
+        <article class="stat-card"><span class="stat-label">АКТИВЫ С ТИКАМИ</span><div class="stat-value" id="market-tick-assets">0</div><small>Получают цены</small></article>
+        <article class="stat-card"><span class="stat-label">ТИКИ В ПАМЯТИ</span><div class="stat-value" id="market-tick-count">0</div><small>Ограниченный буфер текущего сеанса</small></article>
+      </div>
+      <div id="market-connection" class="check-summary">Ожидание рыночных данных</div>
+      <article class="panel-card"><div class="panel-head"><div><h3>OTC инструменты</h3><p>Количество принятых тиков для каждого инструмента</p></div></div><div id="market-assets-list" class="all-logs"><div class="empty">Каталог пока не получен</div></div></article>
     </section>
     <section class="page" id="page-logs">
       <div class="page-intro row-between"><div><h2>Журнал событий</h2><p>Ошибки, соединение, переключение счёта и проверки</p></div><button class="btn secondary" id="export-logs">Экспортировать ZIP</button></div>
