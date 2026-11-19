@@ -91,4 +91,4 @@
 - Electron — Using Native Node Modules: https://www.electronjs.org/docs/latest/tutorial/using-native-node-modules/
 - electron-builder — Troubleshooting / Native Modules: https://www.electron.build/v26/docs/troubleshooting/
 - better-sqlite3 — Troubleshooting: https://github.com/WiseLibs/better-sqlite3/blob/master/docs/troubleshooting.md
-- Node.js 22 SQLite API: https://nodejs.org/docs/latest-v22.x/api/sqlite.html
+- Node.js 22 SQLite API: https://nodejs.org/download/release/v22.23.0/docs/api/sqlite.html
