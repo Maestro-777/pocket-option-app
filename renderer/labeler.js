@@ -678,9 +678,12 @@ async function loadTradeStatistics() {
   if (tradeStatsLoading) return;
   tradeStatsLoading = true;
   try {
+    const period = $('trade-period')?.value || '30';
+    const fromAt = period === 'all' ? undefined : Date.now() - Number(period) * 86_400_000;
+    const filters = fromAt == null ? {} : { fromAt };
     const [statistics, recent] = await Promise.all([
-      api.getTradeStatistics(),
-      api.getTradeResults({ limit: 20 })
+      api.getTradeStatistics(filters),
+      api.getTradeResults({ ...filters, limit: 20 })
     ]);
     renderTradeStatistics(statistics, recent || []);
   } catch (error) {
