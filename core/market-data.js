@@ -115,6 +115,8 @@ class MarketDataHub {
         skipped++; continue;
       }
       const key = asset + '\u0000' + timeframe + '\u0000' + Number(candle.startAt);
+      let existingSeries = this._assets.get(asset)?.get(timeframe);
+      if (existingSeries?.hasCandle(Number(candle.startAt))) { skipped++; continue; }
       if (!this._dirty.has(key) && this._dirty.size >= this.maxDirtyCandles) {
         this.stats.backpressureTicks++; skipped++; continue;
       }
