@@ -93,6 +93,7 @@ class CandleSeries {
   _toPublic(bucket, asOf) {
     return {
       asset: bucket.asset, timeframe: bucket.timeframe, startAt: bucket.startAt, endAt: bucket.endAt,
+      openAt: bucket._openTs, closeAt: bucket._closeTs,
       open: bucket.open, high: bucket.high, low: bucket.low, close: bucket.close,
       tickCount: bucket.tickCount, complete: bucket.endAt <= asOf
     };
@@ -105,6 +106,32 @@ class CandleSeries {
     return [...this._buckets.values()].sort((a, b) => a.startAt - b.startAt)
       .filter(bucket => includeIncomplete || bucket.endAt <= asOf)
       .map(bucket => this._toPublic(bucket, asOf));
+  }
+
+  restoreCandle(candle) {
+    if (!candle || candle.asset !== this.asset || String(candle.timeframe).toUpperCase() !== this.timeframe) {
+      throw new TypeError('Восстанавливаемая свеча не соответствует серии');
+    }
+    const startAt = Number(candle.startAt), endAt = Number(candle.endAt);
+    const openAt = Number(candle.openAt ?? startAt), closeAt = Number(candle.closeAt ?? (endAt - 1));
+    const open = Number(candle.open), high = Number(candle.high), low = Number(candle.low), close = Number(candle.close);
+    const tickCount = Number(candle.tickCount);
+    if (!Number.isSafeInteger(startAt) || startAt <= 0 || startAt % this.duration !== 0 || endAt !== startAt + this.duration ||
+        !Number.isSafeInteger(openAt) || !Number.isSafeInteger(closeAt) || openAt < startAt || closeAt < openAt || closeAt >= endAt ||
+        ![open, high, low, close].every(value => Number.isFinite(value) && value > 0) ||
+        high < Math.max(open, low, close) || low > Math.min(open, high, close) ||
+        !Number.isSafeInteger(tickCount) || tickCount < 1 || candle.complete !== true) {
+      throw new TypeError('Некорректная восстановленная свеча');
+    }
+    const bucket = {
+      asset: this.asset, timeframe: this.timeframe, startAt, endAt,
+      open: open, high, low, close, tickCount,
+      _openTs: openAt, _closeTs: closeAt, _openSeq: 0, _closeSeq: 0
+    };
+    this._buckets.set(startAt, bucket);
+    if (this._oldestStartAt == null || startAt < this._oldestStartAt) this._oldestStartAt = startAt;
+    this._prune();
+    return this._toPublic(bucket, endAt);
   }
 
   getPreEntryWindow(entryAt, lookback) {
