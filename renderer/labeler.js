@@ -10,6 +10,7 @@ let examples = [];
 let marks = { segmentStart: null, entryAt: null, segmentEnd: null, entryPrice: null };
 let markMode = null;
 let editingId = null;
+let journalLoading = false;
 let chartGeometry = null;
 const canvas = $('chart');
 const ctx = canvas.getContext('2d');
@@ -514,6 +515,8 @@ function renderDecisionJournal(items) {
 }
 
 async function loadDecisionJournal() {
+  if (journalLoading) return;
+  journalLoading = true;
   try {
     const items = await api.getAnalysisDecisions({
       asset: selectedAsset() || undefined,
@@ -524,6 +527,8 @@ async function loadDecisionJournal() {
   } catch (error) {
     $('decision-journal').textContent = error.message;
     setStatus('Не удалось загрузить журнал решений', true);
+  } finally {
+    journalLoading = false;
   }
 }
 
@@ -572,3 +577,4 @@ window.addEventListener('resize', resizeCanvas);
 fillTimeframes();
 resizeCanvas();
 reloadAll().catch(error => setStatus(error.message, true));
+setInterval(loadDecisionJournal, 5000);
