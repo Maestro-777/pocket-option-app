@@ -110,6 +110,52 @@ function compareFeatures(left, right) {
   return clamp(100 * (1 - total / weights), 0, 100);
 }
 
+function prepareExamples(examples, timeframe, options = {}) {
+  if (!Array.isArray(examples)) throw new TypeError('examples должен быть массивом');
+  if (!Object.prototype.hasOwnProperty.call(TIMEFRAME_MS, timeframe)) throw new TypeError('Неподдерживаемый таймфрейм');
+  const config = validateOptions(options);
+  const items = [];
+  let skipped = 0;
+  for (const example of examples.slice(0, config.maxExamples)) {
+    if (!example || String(example.timeframe || '').toUpperCase() !== timeframe) { skipped++; continue; }
+    const sampleEntryAt = Number(example.entryAt);
+    const sampleSegmentEnd = Number(example.segmentEnd ?? example.entryAt);
+    const sampleExpirySeconds = Number(example.expirySeconds);
+    const outcomeKnownAt = Math.max(
+      sampleSegmentEnd,
+      sampleEntryAt + (Number.isFinite(sampleExpirySeconds) && sampleExpirySeconds > 0 ? sampleExpirySeconds * 1000 : 0)
+    );
+    if (!Number.isSafeInteger(sampleEntryAt) || !Number.isSafeInteger(sampleSegmentEnd) ||
+        sampleSegmentEnd < sampleEntryAt || !Number.isSafeInteger(outcomeKnownAt)) {
+      skipped++; continue;
+    }
+    const direction = String(example.direction || '').toUpperCase();
+    const asset = String(example.asset || '').toUpperCase();
+    if (!['UP', 'DOWN'].includes(direction) || !asset.endsWith('_OTC')) { skipped++; continue; }
+    if (!Array.isArray(example.inputCandles) || example.inputCandles.length < 3) { skipped++; continue; }
+    try {
+      const sample = example.inputCandles.slice(-config.lookback).map(candle => {
+        const normalized = validateCandle(candle, timeframe, 'Исторический пример');
+        if (normalized.endAt > sampleEntryAt) throw new TypeError('future leakage');
+        if (candle.asset && String(candle.asset).toUpperCase() !== asset) throw new TypeError('asset mismatch');
+        if (candle.timeframe && String(candle.timeframe).toUpperCase() !== timeframe) throw new TypeError('timeframe mismatch');
+        return { ...normalized, complete: true };
+      });
+      for (let i = 1; i < sample.length; i++) {
+        if (sample[i].startAt !== sample[i - 1].startAt + TIMEFRAME_MS[timeframe]) throw new TypeError('gap in sample');
+      }
+      const features = resample(extractFeatures(sample, timeframe), config.lookback);
+      items.push({
+        id: String(example.id || ''), asset, timeframe, direction,
+        similarityOutcome: ['WIN', 'LOSS', 'DRAW'].includes(example.outcome) ? example.outcome : 'UNKNOWN',
+        expirySeconds: Number.isFinite(sampleExpirySeconds) && sampleExpirySeconds > 0 ? sampleExpirySeconds : null,
+        entryAt: sampleEntryAt, outcomeKnownAt, features
+      });
+    } catch (_) { skipped++; }
+  }
+  return { items, skipped };
+}
+
 function analyzeSimilarity(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Параметры анализа должны быть объектом');
   const timeframe = String(input.timeframe || '').toUpperCase();
@@ -134,53 +180,26 @@ function analyzeSimilarity(input) {
   }
   const queryFeatures = extractFeatures(queryWindow, timeframe);
 
-  if (!Array.isArray(input.examples)) throw new TypeError('examples должен быть массивом');
-  const candidates = input.examples.slice(0, options.maxExamples);
+  const prepared = Array.isArray(input.preparedExamples)
+    ? { items: input.preparedExamples, skipped: Number(input.skippedExamples) || 0 }
+    : prepareExamples(input.examples, timeframe, options);
   const matches = [];
-  let skipped = 0;
-  for (const example of candidates) {
-    if (!example || String(example.timeframe || '').toUpperCase() !== timeframe) { skipped++; continue; }
-    // A labelled sample is usable only after its entire observation/outcome window
-    // has elapsed. This prevents both feature leakage and using an outcome that
-    // would not yet have been known at the simulated decision time.
-    const sampleEntryAt = Number(example.entryAt);
-    const sampleSegmentEnd = Number(example.segmentEnd ?? example.entryAt);
-    const sampleExpirySeconds = Number(example.expirySeconds);
-    const outcomeKnownAt = Math.max(
-      sampleSegmentEnd,
-      sampleEntryAt + (Number.isFinite(sampleExpirySeconds) && sampleExpirySeconds > 0 ? sampleExpirySeconds * 1000 : 0)
-    );
-    if (!Number.isSafeInteger(sampleEntryAt) || sampleEntryAt >= entryAt ||
-        !Number.isSafeInteger(sampleSegmentEnd) || sampleSegmentEnd < sampleEntryAt ||
-        !Number.isSafeInteger(outcomeKnownAt) || outcomeKnownAt > entryAt) {
+  let skipped = prepared.skipped;
+  for (const sample of prepared.items) {
+    if (!sample || sample.timeframe !== timeframe || sample.entryAt >= entryAt || sample.outcomeKnownAt > entryAt) {
       skipped++; continue;
     }
-    if (!['UP', 'DOWN'].includes(String(example.direction || '').toUpperCase())) { skipped++; continue; }
-    const sampleAsset = String(example.asset || '').toUpperCase();
-    if (!sampleAsset.endsWith('_OTC')) { skipped++; continue; }
-    if (!Array.isArray(example.inputCandles) || example.inputCandles.length < 3) { skipped++; continue; }
-    try {
-      const sample = example.inputCandles.slice(-options.lookback).map(candle => {
-        const normalized = validateCandle(candle, timeframe, 'Исторический пример');
-        if (normalized.endAt > Number(example.entryAt)) throw new TypeError('future leakage');
-        if (candle.asset && String(candle.asset).toUpperCase() !== sampleAsset) throw new TypeError('asset mismatch');
-        if (candle.timeframe && String(candle.timeframe).toUpperCase() !== timeframe) throw new TypeError('timeframe mismatch');
-        return { ...normalized, complete: true };
-      });
-      for (let i = 1; i < sample.length; i++) if (sample[i].startAt <= sample[i - 1].startAt) throw new TypeError('unordered');
-      const features = resample(extractFeatures(sample, timeframe), options.lookback);
-      const similarity = compareFeatures(queryFeatures, features);
-      matches.push({
-        id: String(example.id || ''),
-        asset: String(example.asset || '').toUpperCase(),
-        timeframe,
-        direction: String(example.direction).toUpperCase(),
-        similarity: Number(similarity.toFixed(2)),
-        outcome: ['WIN', 'LOSS', 'DRAW'].includes(example.outcome) ? example.outcome : 'UNKNOWN',
-        expirySeconds: Number(example.expirySeconds) || null,
-        entryAt: Number(example.entryAt)
-      });
-    } catch (_) { skipped++; }
+    const similarity = compareFeatures(queryFeatures, sample.features);
+    matches.push({
+      id: sample.id,
+      asset: sample.asset,
+      timeframe,
+      direction: sample.direction,
+      similarity: Number(similarity.toFixed(2)),
+      outcome: sample.similarityOutcome,
+      expirySeconds: sample.expirySeconds,
+      entryAt: sample.entryAt
+    });
   }
 
   matches.sort((a, b) => b.similarity - a.similarity || b.entryAt - a.entryAt || a.id.localeCompare(b.id));
@@ -235,6 +254,7 @@ function evaluateWalkForward(examples, options = {}) {
   let signals = 0, noSignal = 0, correct = 0, incorrect = 0;
   const results = [];
 
+  const preparedByTimeframe = new Map();
   for (let i = 0; i < ordered.length; i++) {
     const sample = ordered[i];
     if (!['WIN', 'LOSS'].includes(String(sample.outcome || '').toUpperCase())) {
@@ -245,12 +265,17 @@ function evaluateWalkForward(examples, options = {}) {
       skippedInsufficientHistory++;
       continue;
     }
-    const prior = ordered.slice(0, i);
+    const timeframe = String(sample.timeframe || '').toUpperCase();
+    if (!preparedByTimeframe.has(timeframe)) {
+      preparedByTimeframe.set(timeframe, prepareExamples(ordered, timeframe, config));
+    }
+    const prepared = preparedByTimeframe.get(timeframe);
     const analysis = analyzeSimilarity({
-      timeframe: sample.timeframe,
+      timeframe,
       entryAt: Number(sample.entryAt),
       candles: sample.inputCandles,
-      examples: prior,
+      preparedExamples: prepared.items,
+      skippedExamples: prepared.skipped,
       options: config
     });
     evaluated++;
@@ -289,4 +314,4 @@ function evaluateWalkForward(examples, options = {}) {
   };
 }
 
-module.exports = { DEFAULTS, validateOptions, extractFeatures, compareFeatures, analyzeSimilarity, evaluateWalkForward };
+module.exports = { DEFAULTS, validateOptions, extractFeatures, compareFeatures, prepareExamples, analyzeSimilarity, evaluateWalkForward };
