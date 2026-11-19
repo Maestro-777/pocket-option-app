@@ -22,7 +22,7 @@ class MarketDataHub {
     this._dirty = new Map();
     this.maxDirtyCandles = options.maxDirtyCandles == null ? 100_000 : Number(options.maxDirtyCandles);
     if (!Number.isInteger(this.maxDirtyCandles) || this.maxDirtyCandles < unique.length || this.maxDirtyCandles > 5_000_000) throw new RangeError('maxDirtyCandles должен быть не меньше числа таймфреймов и не больше 5000000');
-    this.stats = { acceptedTicks: 0, rejectedTicks: 0, rejectedAssets: 0, restoredCandles: 0, backpressureTicks: 0, historicalCandlesReceived: 0, historicalCandlesSkipped: 0 };
+    this.stats = { acceptedTicks: 0, rejectedTicks: 0, rejectedAssets: 0, restoredCandles: 0, backpressureTicks: 0, partialTicks: 0, rejectedTimeframes: 0, historicalCandlesReceived: 0, historicalCandlesSkipped: 0 };
   }
 
   ingest(rawTick) {
@@ -31,18 +31,6 @@ class MarketDataHub {
     catch (error) {
       this.stats.rejectedTicks++;
       return { accepted: false, reason: 'invalid-tick', error: error.message };
-    }
-
-    let additionalDirty = 0;
-    for (const timeframe of this.timeframes) {
-      const startAt = Math.floor(tick.timestamp / TIMEFRAME_MS[timeframe]) * TIMEFRAME_MS[timeframe];
-      const key = `${tick.asset}\\u0000${timeframe}\\u0000${startAt}`;
-      if (!this._dirty.has(key)) additionalDirty++;
-    }
-    if (this._dirty.size + additionalDirty > this.maxDirtyCandles) {
-      this.stats.rejectedTicks++;
-      this.stats.backpressureTicks++;
-      return { accepted: false, reason: 'persistence-backpressure', asset: tick.asset };
     }
 
     let assetSeries = this._assets.get(tick.asset);
@@ -58,17 +46,31 @@ class MarketDataHub {
       this._assets.set(tick.asset, assetSeries);
     }
 
-    // Preflight every timeframe before mutating any series.
-    for (const timeframe of this.timeframes) {
-      if (!assetSeries.get(timeframe).canAcceptTick(tick)) {
-        this.stats.rejectedTicks++;
-        return { accepted: false, reason: 'outside-retention', asset: tick.asset, timeframe };
-      }
+    // Timeframes are independent series: an old tick may be outside the
+    // short S5 retention window while still being valid for M1/M15.
+    const eligibleTimeframes = this.timeframes.filter(timeframe => assetSeries.get(timeframe).canAcceptTick(tick));
+    const rejectedTimeframes = this.timeframes.filter(timeframe => !eligibleTimeframes.includes(timeframe));
+    if (!eligibleTimeframes.length) {
+      this.stats.rejectedTicks++;
+      this.stats.rejectedTimeframes += rejectedTimeframes.length;
+      return { accepted: false, reason: 'outside-retention', asset: tick.asset, rejectedTimeframes };
+    }
+
+    let additionalDirty = 0;
+    for (const timeframe of eligibleTimeframes) {
+      const startAt = Math.floor(tick.timestamp / TIMEFRAME_MS[timeframe]) * TIMEFRAME_MS[timeframe];
+      const key = `${tick.asset}\\u0000${timeframe}\\u0000${startAt}`;
+      if (!this._dirty.has(key)) additionalDirty++;
+    }
+    if (this._dirty.size + additionalDirty > this.maxDirtyCandles) {
+      this.stats.rejectedTicks++;
+      this.stats.backpressureTicks++;
+      return { accepted: false, reason: 'persistence-backpressure', asset: tick.asset };
     }
 
     const updates = {};
     try {
-      for (const timeframe of this.timeframes) {
+      for (const timeframe of eligibleTimeframes) {
         const result = assetSeries.get(timeframe).ingest(tick);
         if (!result.accepted) throw new Error('Предварительная проверка и запись свечи разошлись');
         updates[timeframe] = result.candle;
@@ -80,8 +82,12 @@ class MarketDataHub {
       this.stats.rejectedTicks++;
       return { accepted: false, reason: 'series-error', error: error.message };
     }
+    if (rejectedTimeframes.length) {
+      this.stats.partialTicks++;
+      this.stats.rejectedTimeframes += rejectedTimeframes.length;
+    }
     this.stats.acceptedTicks++;
-    return { accepted: true, asset: tick.asset, timestamp: tick.timestamp, updates };
+    return { accepted: true, asset: tick.asset, timestamp: tick.timestamp, updates, rejectedTimeframes };
   }
 
   getAssets() { return [...this._assets.keys()].sort(); }
