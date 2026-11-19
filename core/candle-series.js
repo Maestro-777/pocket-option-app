@@ -143,6 +143,8 @@ class CandleSeries {
     return this.getCandles({ asOf: at }).filter(candle => candle.complete && candle.endAt <= at).slice(-lookback);
   }
 
+  hasCandle(startAt) { return this._buckets.has(Number(startAt)); }
+
   get size() { return this._buckets.size; }
 }
 
