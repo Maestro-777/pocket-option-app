@@ -107,6 +107,8 @@ function createLabelerWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
   labelerWindow.loadFile(path.join(__dirname, 'renderer', 'labeler.html')).catch(error => log('error', 'Не удалось открыть окно разметки', String(error)));
+  labelerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  labelerWindow.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('file://')) event.preventDefault(); });
   labelerWindow.once('ready-to-show', () => labelerWindow && labelerWindow.show());
   labelerWindow.on('closed', () => { labelerWindow = null; });
   return labelerWindow;
