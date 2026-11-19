@@ -4,7 +4,7 @@
 Работа находится в draft PR: https://github.com/Maestro-777/pocket-option-app/pull/2
 
 ### Автоматизированные проверки
-- В репозитории добавлены node:test suites для свечного агрегатора, pattern engine, example store, market data parser, WebSocket bridge, trading gate, decision journal и snapshot store.
+- В репозитории добавлены node:test suites для свечного агрегатора, pattern engine, example store, market data parser, WebSocket bridge, trading gate, decision journal, snapshot store и непрерывного signal scheduler.
 - CI workflow дополнен шагом `npm test` перед Windows installer build.
 - Текущий GitHub Actions run для последнего commit необходимо дождаться; до conclusion нельзя указывать тесты/сборку как прошедшие.
 - Локально в изолированном тестовом каталоге ранее прошли 20 тестов для первоначальной версии модулей. Это не заменяет запуск актуального набора тестов из ветки.
@@ -17,7 +17,8 @@
 
 ### Не подтверждено runtime
 - [ ] CDP debugger attach и injection на реальной странице Pocket Option.
-- [ ] Реальное получение updateAssets/updateStream в Electron.
+- [ ] Реальное получение updateAssets/updateStream и исторических событий в Electron.
+- [ ] Проверить непрерывный scheduler на реальном каталоге всех OTC-пар и всех выбранных таймфреймах.
 - [ ] Одновременные тики нескольких OTC-пар.
 - [ ] Получение/разбор исторических OHLC событий для всех десяти таймфреймов.
 - [ ] Сохранение/восстановление большого snapshot на Windows.
