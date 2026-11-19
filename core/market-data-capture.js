@@ -43,7 +43,7 @@ class MarketDataCapture {
       this.status = 'attached';
       this._notify();
       await this.debuggerApi.sendCommand('Network.enable');
-      if (this._closing) return false;
+      if (!this.attached || this.status !== 'attached') return false;
       this.status = 'listening';
       this.log('info', 'Захват WebSocket Pocket Option включён через Chromium DevTools Protocol');
       this._notify();
