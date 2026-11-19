@@ -5,7 +5,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { TIMEFRAME_MS } = require('./timeframes');
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const VALID_TIMEFRAMES = new Set(Object.keys(TIMEFRAME_MS));
 
 function validateCandle(candle) {
@@ -140,6 +140,16 @@ class MarketDataStore {
     }
   }
 
+    if (version < 4) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        ALTER TABLE analysis_decisions ADD COLUMN historical_json TEXT NOT NULL
+          DEFAULT '{"wins":0,"losses":0,"draws":0,"unknown":0,"winRate":null}'
+          CHECK(json_valid(historical_json));
+        PRAGMA user_version = 4;
+        COMMIT;
+      `);
+    }
   _prepareStatements() {
     this._upsertCandle = this.db.prepare(`
       INSERT INTO market_candles (asset,timeframe,start_at,end_at,open_at,close_at,open,high,low,close,tick_count,updated_at)
@@ -165,8 +175,8 @@ class MarketDataStore {
     `);
     this._insertAnalysisDecision = this.db.prepare(`
       INSERT INTO analysis_decisions
-      (id,asset,timeframe,decision_at,status,direction,reason,params_json,matches_json,votes_json,average_similarity,query_candles_json,algorithm_version,created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      (id,asset,timeframe,decision_at,status,direction,reason,params_json,matches_json,votes_json,average_similarity,query_candles_json,algorithm_version,created_at,historical_json)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `);
   }
 
@@ -417,6 +427,7 @@ class MarketDataStore {
       status: row.status, direction: row.direction, reason: row.reason,
       paramsSnapshot: JSON.parse(row.params_json), matches: JSON.parse(row.matches_json),
       votes: JSON.parse(row.votes_json), averageSimilarity: row.average_similarity,
+      historical: JSON.parse(row.historical_json),
       queryCandles: JSON.parse(row.query_candles_json), algorithmVersion: row.algorithm_version,
       createdAt: row.created_at
     };
@@ -451,18 +462,30 @@ class MarketDataStore {
     if (!Object.values(votes).every(value => Number.isSafeInteger(value) && value >= 0)) throw new TypeError('Некорректные голоса направления');
     const averageSimilarity = decision.averageSimilarity == null ? null : Number(decision.averageSimilarity);
     if (averageSimilarity != null && (!Number.isFinite(averageSimilarity) || averageSimilarity < 0 || averageSimilarity > 100)) throw new TypeError('Некорректное среднее сходство');
+    const sourceHistorical = decision.historical && typeof decision.historical === 'object' && !Array.isArray(decision.historical)
+      ? decision.historical : {};
+    const historical = {
+      wins: Number(sourceHistorical.wins || 0), losses: Number(sourceHistorical.losses || 0),
+      draws: Number(sourceHistorical.draws || 0), unknown: Number(sourceHistorical.unknown || 0),
+      winRate: sourceHistorical.winRate == null ? null : Number(sourceHistorical.winRate)
+    };
+    if (![historical.wins, historical.losses, historical.draws, historical.unknown].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        (historical.winRate != null && (!Number.isFinite(historical.winRate) || historical.winRate < 0 || historical.winRate > 100))) {
+      throw new TypeError('Некорректная историческая результативность');
+    }
     if (!Array.isArray(decision.queryCandles) || decision.queryCandles.length > 300) throw new TypeError('queryCandles должен быть массивом до 300 свечей');
     const paramsJson = JSON.stringify(decision.paramsSnapshot);
     const matchesJson = JSON.stringify(decision.matches);
     const votesJson = JSON.stringify(votes);
+    const historicalJson = JSON.stringify(historical);
     const queryJson = JSON.stringify(decision.queryCandles);
-    if ([paramsJson, matchesJson, votesJson, queryJson].some(value => typeof value !== 'string') ||
+    if ([paramsJson, matchesJson, votesJson, historicalJson, queryJson].some(value => typeof value !== 'string') ||
         paramsJson.length > 64_000 || matchesJson.length > 1_000_000 || queryJson.length > 2_000_000) {
       throw new RangeError('Снимок решения превышает допустимый размер');
     }
     this._insertAnalysisDecision.run(
       id, asset, timeframe, decisionAt, status, direction, reason, paramsJson, matchesJson,
-      votesJson, averageSimilarity, queryJson, algorithmVersion, now
+      votesJson, averageSimilarity, queryJson, algorithmVersion, now, historicalJson
     );
     return this.getAnalysisDecision(id);
   }
