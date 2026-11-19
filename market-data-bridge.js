@@ -120,43 +120,54 @@ function setAmount(amount){
  const input=findBetInput();if(!input)return false;const formatted=formatAmount(amount);
  try{setInputValue(input,formatted);return Math.abs(Number(String(input.value).replace(',','.'))-amount)<0.000001;}catch(_){return false;}
 }
-function expirationSecondsFromText(text){
- const value=String(text||'').trim();if(!value)return null;
- const parts=value.split(':').map(x=>Number(x));if(parts.some(x=>!Number.isInteger(x)))return null;
- if(parts.length===3)return parts[0]*3600+parts[1]*60+parts[2];
- if(parts.length===2)return parts[0]*60+parts[1];return null;
+const PO_TIMEFRAMES={S3:3,S15:15,S30:30,M1:60,M3:180,M5:300,M30:1800,H1:3600,H4:14400};
+function getExpirationLabels(sec){
+ const map={3:['S3','3S','00:00:03','0:00:03','3SEC'],15:['S15','15S','00:00:15','0:00:15','15SEC'],30:['S30','30S','00:00:30','0:00:30','30SEC'],60:['M1','1M','00:01:00','01:00','1MIN'],180:['M3','3M','00:03:00','03:00','3MIN'],300:['M5','5M','00:05:00','05:00','5MIN'],1800:['M30','30M','00:30:00','30:00','30MIN'],3600:['H1','1H','01:00:00','1:00:00','60MIN'],14400:['H4','4H','04:00:00','4:00:00']};
+ return(map[sec]||[String(sec)]).slice().sort((a,b)=>b.length-a.length);
 }
+function normExpLabel(text){return String(text||'').trim().toUpperCase().replace(/\s+/g,'');}
+function labelMatchesExpiration(el,targets,exact){
+ const chunks=[el.textContent,el.innerText,el.getAttribute('data-time'),el.getAttribute('data-value'),el.getAttribute('data-period'),el.getAttribute('title')];
+ for(const chunk of chunks){const text=normExpLabel(chunk);if(!text)continue;for(const target of targets){const value=normExpLabel(target);if(text===value)return true;if(!exact&&value.length>=2&&text.indexOf(value)>=0)return true;}}
+ return false;
+}
+function clickExpirationEl(el){
+ if(!el||el.offsetParent===null)return false;
+ try{el.scrollIntoView({block:'nearest',inline:'center',behavior:'instant'});el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window}));el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window}));el.click();return true;}catch(_){return false;}
+}
+function parseExpirationDisplay(text){
+ const value=String(text||'').trim();if(!value)return null;const parts=value.split(':').map(x=>parseInt(x,10));if(parts.some(Number.isNaN))return null;
+ if(parts.length===3)return parts[0]*3600+parts[1]*60+parts[2];if(parts.length===2)return parts[0]*60+parts[1];return null;
+}
+function getExpirationDisplayEl(){return document.querySelector('.block--expiration-inputs .value__val')||document.querySelector('.block--expiration-inputs .control__value .value__val');}
 function readExpiration(){
- const display=document.querySelector('.block--expiration-inputs .value__val')||document.querySelector('.block--expiration-inputs .control__value .value__val');
- if(display){const seconds=expirationSecondsFromText(display.textContent);if(seconds!=null)return seconds;}
- const active=document.querySelector('.dops__timeframes-item--active, .dops__timeframes-item.active');
- if(active){const seconds=expirationSecondsFromText(active.textContent);if(seconds!=null)return seconds;const key=String(active.textContent||'').trim().toUpperCase();const map={S5:5,S10:10,S15:15,S30:30,M1:60,M2:120,M3:180,M5:300,M10:600,M15:900};if(map[key]!=null)return map[key];}
+ const display=getExpirationDisplayEl();if(display){const seconds=parseExpirationDisplay(display.textContent);if(seconds!=null)return seconds;}
+ const active=document.querySelector('.dops__timeframes-item--active, .dops__timeframes-item.active');if(active){const key=normExpLabel(active.textContent);if(PO_TIMEFRAMES[key]!=null)return PO_TIMEFRAMES[key];}
  return null;
 }
-function expirationLabels(seconds){
- const h=Math.floor(seconds/3600),m=Math.floor((seconds%3600)/60),s=seconds%60;
- const clock=[h,m,s].map((x,i)=>i===0?String(x).padStart(2,'0'):String(x).padStart(2,'0')).join(':');
- const minuteClock=[m,s].map(x=>String(x).padStart(2,'0')).join(':');
- const named=({5:['S5','5S'],10:['S10','10S'],15:['S15','15S'],30:['S30','30S'],60:['M1','1M'],120:['M2','2M'],180:['M3','3M'],300:['M5','5M'],600:['M10','10M'],900:['M15','15M']})[seconds]||[];return new Set([String(seconds),String(seconds)+'S','S'+seconds,clock,minuteClock,...named]);
+function expirationAlreadySet(seconds,targets){
+ const current=readExpiration();if(current!=null)return current===seconds;
+ const display=getExpirationDisplayEl();return!!(display&&labelMatchesExpiration(display,targets,true));
+}
+function isExpirationDropdownOpen(){
+ const modal=document.querySelector('.trading-panel-modal__dops .dops__timeframes, .dops__timeframes');if(modal&&modal.offsetParent!==null)return true;
+ for(const item of document.querySelectorAll('.dops__timeframes-item'))if(item.offsetParent!==null)return true;return false;
 }
 function openExpirationDropdown(){
- const selectors=['.block--expiration-inputs .control__value.value','.block--expiration-inputs .control__value','.block--expiration-inputs .value__val','.block--expiration-inputs'];
- for(const selector of selectors){const el=document.querySelector(selector);if(el&&el.offsetParent!==null){el.click();return true;}}return false;
+ const triggers=['.block--expiration-inputs .control__value.value','.block--expiration-inputs .control__value','.block--expiration-inputs .value__val','.block--expiration-inputs'];
+ for(const selector of triggers){const el=document.querySelector(selector);if(el&&el.offsetParent!==null&&clickExpirationEl(el))return true;}return false;
+}
+function clickExpirationItem(seconds,targets){
+ const items=document.querySelectorAll('.trading-panel-modal__dops .dops__timeframes-item, .dops__timeframes .dops__timeframes-item, .dops__timeframes-item');let fallback=null;
+ for(let pass=0;pass<2;pass++){for(const el of items){if(!labelMatchesExpiration(el,targets,pass===0))continue;if(el.className&&/active|selected|current|checked/i.test(String(el.className))&&expirationAlreadySet(seconds,targets))return true;if(!fallback)fallback=el;if(clickExpirationEl(el))return true;}if(fallback)break;}
+ return fallback?clickExpirationEl(fallback):false;
 }
 async function setExpiration(seconds){
- if(readExpiration()===seconds)return true;const labels=expirationLabels(seconds);
- for(let attempt=0;attempt<2;attempt++){
-  openExpirationDropdown();await sleep(140);
-  const items=document.querySelectorAll('.trading-panel-modal__dops .dops__timeframes-item, .dops__timeframes .dops__timeframes-item, .dops__timeframes-item');
-  for(const el of items){
-   if(el.offsetParent===null)continue;
-   const chunks=[el.textContent,el.getAttribute('data-time'),el.getAttribute('data-value'),el.getAttribute('data-period'),el.getAttribute('title')];
-   const match=chunks.some(text=>labels.has(String(text||'').trim().toUpperCase().replace(/\s+/g,'')));
-   if(!match)continue;
-   try{el.scrollIntoView({block:'nearest',inline:'center'});el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window}));el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window}));el.click();}catch(_){}
-   await sleep(140);if(readExpiration()===seconds)return true;
-  }
- }
+ const targets=getExpirationLabels(seconds);if(expirationAlreadySet(seconds,targets))return true;
+ if(!isExpirationDropdownOpen()){openExpirationDropdown();await sleep(140);}
+ if(clickExpirationItem(seconds,targets)){await sleep(120);if(expirationAlreadySet(seconds,targets))return true;}
+ openExpirationDropdown();await sleep(160);
+ if(clickExpirationItem(seconds,targets)){await sleep(120);return expirationAlreadySet(seconds,targets);}
  return false;
 }
 function findTradeButton(direction){
