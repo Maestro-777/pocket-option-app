@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Разметка исторических OTC-ситуаций</title>
+<link rel="stylesheet" href="labeler.css">
+</head>
+<body>
+<header class="topbar">
+  <div><p class="eyebrow">POCKET OPTION · DATASET BUILDER</p><h1>Ручная разметка исторических ситуаций</h1></div>
+  <div class="top-actions"><span id="status" class="status">Подключение…</span><button id="refresh-all" class="button secondary">Обновить</button></div>
+</header>
+<main class="layout">
+  <section class="chart-panel">
+    <div class="toolbar">
+      <label>OTC-пара<select id="asset-select"></select></label>
+      <label>Таймфрейм<select id="timeframe-select"></select></label>
+      <button id="reload-chart" class="button secondary">Загрузить свечи</button>
+      <button id="open-site" class="button ghost">Открыть Pocket Option</button>
+    </div>
+    <div class="chart-meta"><span id="bar-count">0 свечей</span><span id="chart-range">История не загружена</span></div>
+    <canvas id="chart" aria-label="Исторический свечной график"></canvas>
+    <div class="mark-toolbar">
+      <button id="mark-start" class="button mark">1 · Начало участка</button>
+      <button id="mark-entry" class="button mark">2 · Точка входа</button>
+      <button id="mark-end" class="button mark">3 · Конец участка</button>
+      <button id="clear-marks" class="button ghost">Сбросить отметки</button>
+      <span id="mark-hint">Выберите отметку, затем нажмите на соответствующую свечу</span>
+    </div>
+    <div class="notice" id="history-notice">История поступает из событий открытого графика Pocket Option. Если свечей нет, откройте сайт, выберите нужную OTC-пару и тот же таймфрейм, затем обновите данные здесь.</div>
+  </section>
+  <aside class="sidebar">
+    <section class="form-panel">
+      <div class="panel-title"><div><p class="eyebrow">MANUAL SAMPLE</p><h2 id="form-title">Новый пример</h2></div><span class="counter" id="selected-count">0 / 0 / 0</span></div>
+      <label>Направление
+        <select id="direction"><option value="UP">ВВЕРХ</option><option value="DOWN">ВНИЗ</option></select>
+      </label>
+      <div class="two-cols">
+        <label>Экспирация, секунд<input id="expiry-seconds" type="number" min="1" max="86400" value="15"></label>
+        <label>Цена входа<input id="entry-price" type="number" min="0.00000001" step="any" placeholder="Отметьте вход на графике"></label>
+      </div>
+      <div class="two-cols">
+        <label>Цена на экспирации<input id="expiry-price" type="number" min="0.00000001" step="any" placeholder="Необязательно"></label>
+        <label>Результат
+          <select id="outcome"><option value="UNKNOWN">Неизвестно</option><option value="WIN">Выигрыш</option><option value="LOSS">Проигрыш</option><option value="DRAW">Ничья</option></select>
+        </label>
+      </div>
+      <label>Примечание<textarea id="notes" rows="3" maxlength="2000" placeholder="Что характерно для этой ситуации?"></textarea></label>
+      <div class="mark-summary" id="mark-summary">Начало: — · Вход: — · Конец: —</div>
+      <div class="form-actions">
+        <button id="save-example" class="button primary" disabled>Сохранить пример</button>
+        <button id="cancel-edit" class="button ghost" hidden>Отмена</button>
+      </div>
+      <p class="form-footnote">Предвходящие свечи сохраняются отдельно от движения после входа. Будущие свечи не попадают во входные признаки.</p>
+    </section>
+    <section class="examples-panel">
+      <div class="panel-title"><div><p class="eyebrow">SAVED DATASET</p><h2>Сохранённые примеры</h2></div><span id="example-count" class="counter">0</span></div>
+      <div id="examples-list" class="examples-list"><p class="empty">Пока нет сохранённых примеров.</p></div>
+    </section>
+  </aside>
+</main>
+<script src="labeler.js"></script>
+</body>
+</html>
