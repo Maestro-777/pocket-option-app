@@ -4,7 +4,7 @@
 Автоматическая проверка кода на commit `9f9e6fafcc0b8559bd14c2c76d059bae006183bb` в ветке `work/pattern-engine-foundation` завершилась успешно. После этого commit были проверены совпадающие SHA основных runtime-файлов (main.js, market-data-bridge.js, trade-execution.js, trade-ledger.js, signal-scheduler.js, package.json). Документационные обновления не меняют исполняемый код.
 
 ## Автоматизированные тесты
-- `node:test` покрывает timeframes, market data/tick aggregation, OHLC store, pattern normalization, matcher/look-ahead, example store, signal scheduler, decision journal, market-data bridge, trading gate, DEMO execution adapter и TradeLedger.
+- `node:test` покрывает timeframes, market data/tick aggregation, CDP multi-socket capture, OTC AssetCatalog, Socket.IO text/binary decoder, OHLC store, pattern normalization, matcher/look-ahead, example store, signal scheduler, decision journal, page bridge, trading gate, DEMO execution adapter, scan-state recovery и TradeLedger.
 - Отдельные проверки покрывают запрет REAL, явное включение DEMO, сериализацию команд, отмену in-flight команды при паузе, сверку после перезапуска, fail-closed DOM asset mismatch и отказ от неоднозначной корреляции.
 - `npm run check` проверяет синтаксис main/preload/site bridge/market-data bridge/core и renderer annotation.
 - `npm test` запускает unit-тесты.
