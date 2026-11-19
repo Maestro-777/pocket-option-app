@@ -118,3 +118,71 @@ test('prunes old candles independently for every asset and timeframe', () => {
   assert.deepEqual(store.getCandles('GBPUSD_OTC', 'S5').map(row => row.startAt), [15000, 20000]);
   store.close();
 });
+
+function manualExample(overrides = {}) {
+  return {
+    id: 'sample-001', asset: 'EURUSD_OTC', timeframe: 'S5',
+    segmentStart: 5000, segmentEnd: 20000, entryAt: 10000,
+    direction: 'UP', expirySeconds: 15, entryPrice: 1.2, expiryPrice: 1.1,
+    inputCandles: [candle({ startAt: 5000, endAt: 10000 })],
+    postCandles: [candle({ startAt: 10000, endAt: 15000 }), candle({ startAt: 15000, endAt: 20000 })],
+    notes: 'manual sample', ...overrides
+  };
+}
+
+test('creates an independent manual example with pre-entry and post-entry snapshots', () => {
+  const store = new MarketDataStore(':memory:');
+  const saved = store.createManualExample(manualExample(), 30000);
+  assert.equal(saved.id, 'sample-001');
+  assert.equal(saved.outcome, 'LOSS');
+  assert.equal(saved.inputCandles.length, 1);
+  assert.equal(saved.postCandles.length, 2);
+  assert.equal(saved.createdAt, 30000);
+  assert.equal(store.getStats().manualExamples, 1);
+  assert.equal(store.getStats().candles, 0);
+  store.close();
+});
+
+test('rejects future leakage into input features and post-entry candles outside the segment', () => {
+  const store = new MarketDataStore(':memory:');
+  assert.throws(() => store.createManualExample(manualExample({
+    inputCandles: [candle({ startAt: 10000, endAt: 15000 })]
+  })), /Предвходящие признаки/);
+  assert.throws(() => store.createManualExample(manualExample({
+    postCandles: [candle({ startAt: 15000, endAt: 20000 }), candle({ startAt: 20000, endAt: 25000 })]
+  })), /Поствходящие свечи/);
+  assert.equal(store.getStats().manualExamples, 0);
+  store.close();
+});
+
+test('edits and deletes a manual example without changing its identity or creation time', () => {
+  const store = new MarketDataStore(':memory:');
+  const created = store.createManualExample(manualExample(), 30000);
+  const updated = store.updateManualExample(created.id, { notes: 'reviewed', direction: 'DOWN' }, 40000);
+  assert.equal(updated.id, created.id);
+  assert.equal(updated.createdAt, created.createdAt);
+  assert.equal(updated.updatedAt, 40000);
+  assert.equal(updated.notes, 'reviewed');
+  assert.equal(updated.direction, 'DOWN');
+  assert.equal(store.deleteManualExample(created.id), true);
+  assert.equal(store.deleteManualExample(created.id), false);
+  assert.equal(store.listManualExamples().length, 0);
+  store.close();
+});
+
+test('filters manual examples by asset and timeframe and never mixes them with market candles', () => {
+  const store = new MarketDataStore(':memory:');
+  store.createManualExample(manualExample(), 30000);
+  store.createManualExample(manualExample({
+    id: 'sample-002', asset: 'GBPUSD_OTC', timeframe: 'M1',
+    segmentStart: 60000, segmentEnd: 180000, entryAt: 120000,
+    inputCandles: [candle({ asset: 'GBPUSD_OTC', timeframe: 'M1', startAt: 60000, endAt: 120000 })],
+    postCandles: [candle({ asset: 'GBPUSD_OTC', timeframe: 'M1', startAt: 120000, endAt: 180000 })]
+  }), 31000);
+  assert.equal(store.listManualExamples({ asset: 'EURUSD_OTC' }).length, 1);
+  assert.equal(store.listManualExamples({ timeframe: 'M1' }).length, 1);
+  assert.throws(() => store.createManualExample(manualExample({ asset: 'EURUSD' })), /OTC/);
+  assert.equal(store.getStats().candles, 0);
+  assert.equal(store.getStats().manualExamples, 2);
+  store.close();
+});
