@@ -1,39 +1,59 @@
 # Руководство разработчика — Pocket Option Background
 
 **Версия документа:** 1.0  
-**Версия приложения:** 0.1.0  
+**Версия приложения:** 0.1.1  
 **Стек:** Electron, Node.js, HTML, CSS, JavaScript  
 **Целевая платформа первой версии:** Windows 11 x64  
 **Статус реализации:** исходный код создан; установка зависимостей, запуск на Windows 11, интеграция с актуальным DOM Pocket Option и сборка установщика ещё должны быть проверены.
 
 ## 1. Обзор архитектуры
 
-Pocket Option Background — отдельное Electron-приложение в каталоге `Pocket-Option-Background/`. Оно не является браузерным расширением и не встраивает существующее торговое ядро.
+Pocket Option Background — отдельное Electron-приложение. Оно не является браузерным расширением: функциональность `pocket-tracker` переносится выборочно через адаптированные модули данных и торговых команд. В приложении есть непрерывный matcher/scheduler и fail-closed DEMO-only execution adapter.
 
 Архитектура разделена на три зоны:
 
 1. **Main process (`main.js`)** — окна, жизненный цикл, трей, настройки, журналы, мониторинг, восстановление, обновления и IPC.
 2. **Renderer processes (`renderer/`)** — пользовательская панель и мини-виджет. Node.js API напрямую им не предоставляется.
-3. **Интеграция сайта (`site-preload.js`, `site-bridge.js`)** — ограниченный мост для передачи сведений о балансе и технических событиях из окна Pocket Option в главный процесс.
+3. **Интеграция сайта** — `site-preload.js`/`site-bridge.js` для баланса и DOM; `market-data-bridge.js` для changeSymbol, DEMO-команды, истории/close fallback; основной market-data capture выполняется через CDP в `core/market-data-capture.js`.
+4. **Core (`core/`)** — свечи, matcher, example store, signal scheduler, журнал решений, торговый gate, DEMO executor и постоянный trade ledger.
 
 Обмен между renderer и main организован через `preload.js` и `contextBridge`.
 
 ## 2. Структура каталогов
 
 ```text
-Pocket-Option-Background/
+pocket-option-app/
 ├── package.json
 ├── README.md
 ├── main.js
 ├── preload.js
 ├── site-preload.js
 ├── site-bridge.js
+├── market-data-bridge.js
+├── core/
+│   ├── asset-catalog.js
+│   ├── pocketoption-protocol.js
+│   ├── market-data-capture.js
+│   ├── timeframes.js
+│   ├── market-data.js
+│   ├── market-data-store.js
+│   ├── patterns.js
+│   ├── example-store.js
+│   ├── matcher.js
+│   ├── signal-scheduler.js
+│   ├── decision-journal.js
+│   ├── trading-gate.js
+│   ├── trade-execution.js
+│   ├── trade-ledger.js
+│   └── scan-state-store.js
 ├── renderer/
 │   ├── index.html
 │   ├── styles.css
 │   ├── app.js
+│   ├── annotation.js
 │   ├── widget.html
 │   └── widget.js
+├── docs/project-memory/
 └── modules/
     ├── manager.js
     ├── README.md
@@ -50,6 +70,19 @@ Pocket-Option-Background/
 | `preload.js` | Безопасный API `window.pocketApp` для renderer |
 | `site-preload.js` | Проверка сообщений от страницы и пересылка разрешённых payload в main |
 | `site-bridge.js` | DOM-адаптер Pocket Option, определение режима и баланса, heartbeat/MutationObserver |
+| `market-data-bridge.js` | Page helper для changeSymbol, DOM-верификации DEMO-команды и fallback history/close events |
+| `core/market-data-capture.js` | CDP Network capture нескольких WebSocket соединений с раздельным decoder state |
+| `core/pocketoption-protocol.js` | Socket.IO text/binary decoder с привязкой binary attachments к конкретному socket |
+| `core/asset-catalog.js` | OTC asset catalog, rawSymbol, alias resolution и отказ при неоднозначности |
+| `core/market-data.js` | Приём тиков/истории, каталог активов, OHLC и раздельные данные по парам/таймфреймам |
+| `core/patterns.js`, `core/matcher.js` | Нормализация формы свечей, сравнение без абсолютной цены и без будущих данных |
+| `core/example-store.js` | Постоянное хранилище ручных исторических примеров |
+| `core/signal-scheduler.js` | Непрерывный анализ новых закрытых свечей по OTC-парам/таймфреймам и ранжирование кандидатов |
+| `core/decision-journal.js` | JSONL журнал решений с snapshot настроек |
+| `core/trading-gate.js` | Пауза, защита от повторного входа, лимит слотов и восстановление незавершённых сделок |
+| `core/trade-execution.js` | DEMO-only executor, последовательное переключение пары, correlation guard и ручная сверка |
+| `core/trade-ledger.js` | Отдельное постоянное хранилище сделок и статистики |
+| `core/scan-state-store.js` | Персистентная дедупликация обработанных баров после перезапуска |
 | `renderer/index.html` | Разметка главной панели и разделов |
 | `renderer/styles.css` | Тема и стили главного окна и виджета |
 | `renderer/app.js` | Отрисовка состояния, действия пользователя, фильтрация журналов |
@@ -133,6 +166,10 @@ Renderer не получает прямой доступ к Node.js. В `preload
 | `runCheck()` | Запуск полной диагностики |
 | `readLogs()` / `exportLogs()` | Чтение и экспорт журналов |
 | `checkUpdates()` / `downloadUpdate()` / `installUpdate()` | Управление обновлением |
+| `getAnalysisConfig()` / `setAnalysisConfig(config)` / `scanNow()` / `getRecentDecisions()` | Настройки и ручной запуск непрерывного анализа |
+| `getTradingState()` / `setTradingEnabled(enabled)` / `setTradingPaused(paused)` / `setTradingConfig(config)` / `resolveTrade(request)` | Управление только DEMO-торговым контуром и сверка незавершённых записей |
+| `openAnnotationWindow()` | Открыть отдельное окно разметки |
+| `onSignalDecision(fn)` / `onTradeUpdate(fn)` | Подписка на сигналы и состояние сделок |
 | `onStatus(fn)` / `onLog(fn)` / `onCheckResult(fn)` | Подписка на события main process |
 
 Не добавляйте в preload универсальный IPC send/invoke, произвольный доступ к файловой системе или shell. Для каждой новой операции создавайте отдельный метод с проверкой аргументов на стороне main.
@@ -254,7 +291,7 @@ Health tick делает запрос к `https://pocketoption.com/` с тайм
 - health checks загруженных модулей;
 - торговое ядро.
 
-Торговое ядро добавляется в результат с `state: 'not-connected'`, `ok: true` и описанием, что оно не подключено в этой сборке. Это информативное состояние, а не тест реального торгового движка.
+Диагностика отдельно проверяет непрерывный SignalScheduler и DEMO execution guard. Наличие активного scheduler не доказывает, что DOM-команда сделки сработает на текущей версии сайта. Реальное открытие/закрытие нужно проверять на DEMO.
 
 ## 12. Логирование и экспорт
 
@@ -397,7 +434,7 @@ exports.createModule = async context => ({
 
 1. Интеграция баланса зависит от CSS-селекторов DOM сайта, не от официального API.
 2. URL маршрута REAL и сегмент валюты должны быть подтверждены тестом.
-3. Нет торгового ядра и автоматического выставления сделок.
+3. DEMO executor реализован, но не подтверждён живым end-to-end тестом; REAL execution запрещён.
 4. Нет гарантии фоновой непрерывности сайта при системном сне, throttling ОС, смене сети или серверном сбое.
 5. Нет готового проверенного Windows installer в текущем статусе разработки.
 6. Нет опубликованного релиза для end-to-end проверки автообновления.
@@ -416,3 +453,33 @@ exports.createModule = async context => ({
 - Сохранять явное подтверждение перехода на REAL.
 - Не обозначать неподключённые подсистемы как успешно протестированные.
 - Перед выпуском каждой версии обновлять документацию и чек-лист тестирования.
+
+## 19. Core data flow и правила анализа
+
+1. `MarketDataCapture` слушает Chromium DevTools Protocol Network.webSocketFrameReceived и ведёт отдельный Socket.IO decoder для каждого requestId. `AssetCatalog` разрешает OTC активы и неоднозначные алиасы.
+2. CDP capture передаёт updateAssets/updateStream/quotes/stream в `MarketDataService`; page bridge используется для changeSymbol, истории/close events и fallback. `MarketDataService` хранит canonical asset и raw platform symbol, агрегирует тики в OHLC.
+3. `SignalScheduler` сканирует только новые закрытые бары; повтор того же asset/timeframe/barEndAt в пределах процесса не запускается повторно.
+4. `matcher.js` сравнивает нормализованные формы, допускает совпадения между исходными парами, но никогда не смешивает таймфреймы. Входные признаки ограничены свечами до entryAt.
+5. Все решения, в том числе отказы, журналируются с settings snapshot. Ранжирование — лексикографическое: среднее сходство → число голосов → согласованность → исторический win rate.
+6. `maxOpenTrades` ограничивает top candidates и слоты execution gate. Точные веса не вводятся без отдельного согласования.
+7. `ScanStateStore` атомарно сохраняет lastScanned bar keys; `DecisionJournal.readRecent()` служит дополнительным восстановлением и наполняет недавнюю историю решений.
+
+## 20. DEMO execution state machine и безопасность
+
+- Автоторговля при старте всегда disarmed; для arm нужны выбранный DEMO, `lastBalance.accountType === 'demo'` и URL с `/demo-quick-high-low/`.
+- REAL отключает autoTradingEnabled и ставит gate на паузу; executor дополнительно повторно проверяет DEMO перед каждой командой.
+- `TradeExecutionAdapter` сериализует команды, запрещает повторный сигнал и две незавершённые сделки на одной паре.
+- При `maxOpenTrades > 1` следующая сделка блокируется до подтверждения, что close-event позволяет сопоставить результат с парой. Неоднозначные события не угадываются.
+- `market-data-bridge.js` проверяет активный инструмент в DOM, применённую сумму и экспирацию. Если селектор не найден/значение не подтверждено, торговая кнопка не нажимается.
+- Pause вызывает cancellation token в page context и ожидает завершения execution queue; scheduler и market-data ingestion не останавливаются.
+- После клика статус — `SUBMITTED_UNCONFIRMED`, не broker-confirmed open. `TradeLedger` сохраняет запись до команды, восстанавливает PREPARING/SUBMITTED как UNKNOWN_AFTER_RESTART и требует автоматического результата или явной ручной сверки.
+- Close-event корреляция основана только на однозначных полях (asset/amount и уникальный pending record). Unmatched сохраняются отдельно и не входят в статистику.
+- `TradeLedger` хранит только DEMO-сделки; пользовательские примеры и решения matcher остаются отдельными сущностями.
+
+## 21. Проверки и известные непроверенные участки
+
+- Unit tests проверяют matcher, отсутствие look-ahead, scheduler, journal, market-data bridge, gate, trade executor, trade ledger и recovery.
+- Windows CI должен пройти `npm run check`, `npm test` и `npm run dist`.
+- Нужен живой DEMO smoke test: updateAssets/updateStream, смена OTC пары, активная пара в DOM, сумма, экспирация, кнопка, close-event и баланс.
+- До такого smoke test не утверждать, что торговая команда полностью совместима с текущим сайтом.
+- Многосделочность >1 не считать подтверждённой до фактической проверки close-event correlation на разных парах.

@@ -9,7 +9,7 @@
 ### Основной: pocket-option-app
 https://github.com/Maestro-777/pocket-option-app
 
-Целевой репозиторий Electron-приложения и его будущего торгового ядра. Текущий package.json указывает версию 0.1.1. README описывает оболочку управления окном Pocket Option и постоянной сессией.
+Целевой репозиторий Electron-приложения, ручной разметки, непрерывного matcher/scheduler, журналирования и DEMO-only execution. Текущий package.json указывает версию 0.1.1. Реальный end-to-end тест DOM-команды и close-event на живой DEMO-сессии ещё обязателен.
 
 ### Вторичный: pocket-tracker
 https://github.com/Maestro-777/pocket-tracker
@@ -33,3 +33,20 @@ https://github.com/Maestro-777/pocket-tracker/blob/main/3.6.0_0/ARCHITECTURE.md
 - Сохранять историю решений и причин.
 - Не утверждать, что код, сборка, тест или торговая операция выполнены, если это не подтверждено.
 - Не хранить секреты, пароли, cookies, токены и приватные финансовые данные в Git.
+
+## Реализованные основы
+- Отдельное окно исторической разметки и независимое хранилище пользовательских примеров.
+- MarketDataService: OTC-каталог с raw asset id, тики, OHLC и раздельные таймфреймы.
+- Matcher с нормализацией формы свечей и запретом look-ahead.
+- Непрерывный SignalScheduler, ранжирование и журнал решений со snapshot параметров.
+- DEMO-only executor с явным включением, паузой, отменой in-flight команды, проверкой активной пары/суммы/экспирации.
+- TradeLedger отдельно от примеров и журнала решений; recovery и статистика по группам.
+
+## Обязательные ограничения до live DEMO проверки
+- Не включать автоторговлю без явного действия пользователя.
+- REAL execution запрещён.
+- Не считать UI-клик подтверждением открытия брокером: статус SUBMITTED_UNCONFIRMED до close-event.
+- Не разрешать мультисделочность >1 до подтверждения полей close-event, позволяющих однозначно сопоставить пару.
+- DOM selectors и протокол закрытия не считать проверенными без живого DEMO smoke test.
+
+- Ветка реализации дополнена CDP Network capture: отдельный decoder на каждый WebSocket, Socket.IO binary attachment support, OTC AssetCatalog и интеграция с MarketDataService. Page bridge оставлен для смены инструмента, истории, close events и fallback.

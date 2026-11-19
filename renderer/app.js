@@ -2,7 +2,7 @@
 const api = window.pocketApp;
 const $ = id => document.getElementById(id);
 let logs = [];
-const pages = { home: 'Главная', monitor: 'Мониторинг', logs: 'Журналы', settings: 'Настройки', updates: 'Обновления' };
+const pages = { home: 'Главная', monitor: 'Мониторинг', market: 'Рыночные данные', annotation: 'Разметка примеров', logs: 'Журналы', settings: 'Настройки', updates: 'Обновления' };
 function toast(message) {
   const el = $('toast'); el.textContent = message; el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2600);
@@ -19,6 +19,7 @@ function showPage(name) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.page === name));
   $('page-title').textContent = pages[name];
   if (name === 'logs') renderLogs();
+  if (name === 'market') refreshMarketData();
   if (name === 'settings') loadSettings();
 }
 document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
@@ -59,6 +60,37 @@ function renderStatus(status) {
     $('install-update').disabled = status.update.status !== 'downloaded';
     if (status.update.version) $('update-version').textContent = status.update.version;
   }
+}
+async function refreshMarketData() {
+  try {
+    const [status, assets] = await Promise.all([
+      api.getMarketDataStatus(),
+      api.listMarketAssets({ otcOnly: true })
+    ]);
+    renderMarketData(status, assets);
+  } catch (error) {
+    $('market-connection').textContent = 'Не удалось получить состояние рыночных данных: ' + String(error.message || error);
+  }
+}
+function renderMarketData(status, assets) {
+  if (!status) return;
+  $('market-assets-count').textContent = status.assetCount ?? 0;
+  $('market-otc-count').textContent = status.otcAssetCount ?? 0;
+  $('market-tick-assets').textContent = status.tickAssetCount ?? 0;
+  $('market-tick-count').textContent = status.tickCount ?? 0;
+  const last = status.stats && status.stats.lastTickAt ? new Date(status.stats.lastTickAt).toLocaleTimeString('ru-RU') : 'нет';
+  $('market-connection').textContent = (status.connected ? 'Поток активен' : 'Нет свежих сообщений') +
+    ' · Принято тиков: ' + (status.stats?.accepted ?? 0) +
+    ' · Отклонено: ' + (status.stats?.rejected ?? 0) +
+    ' · Последний тик: ' + last +
+    ' · Таймфреймы: ' + (status.supportedTimeframes || []).join(', ') +
+    ' · Захват: ' + (status.capture ? (status.capture.status === 'listening' ? 'CDP WebSocket (' + status.capture.activeSockets + ' соединений, отклонено OTC/alias: ' + (status.capture.rejectedAmbiguousAssets || 0) + '/' + (status.capture.rejectedUnknownAssets || 0) + ')' : 'CDP ' + status.capture.status) : 'page bridge fallback');
+  const rows = Array.isArray(assets) ? assets : [];
+  $('market-assets-list').innerHTML = rows.map(asset =>
+    '<div class="log-entry"><span class="level">' + (asset.otc ? 'OTC' : '—') + '</span><b>' +
+    escapeHtml(asset.symbol) + '</b><span>' + escapeHtml(asset.name) + '</span><span>тиков: ' +
+    Number(asset.tickCount || 0) + '</span></div>'
+  ).join('') || '<div class="empty">OTC инструменты ещё не обнаружены</div>';
 }
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -138,9 +170,13 @@ $('download-update').addEventListener('click', async () => {
 });
 $('install-update').addEventListener('click', () => api.installUpdate());
 
+if (location.hash === '#annotation') showPage('annotation');
 api.onStatus(renderStatus);
 api.onLog(addLog);
 api.onCheckResult(renderCheck);
+api.onMarketData(() => { if ($('page-market').classList.contains('active')) refreshMarketData(); });
+$('refresh-market').addEventListener('click', refreshMarketData);
 Promise.all([api.getStatus(), api.readLogs()]).then(([status, history]) => {
   renderStatus(status); logs = history || []; renderRecent();
+  if (status.marketData) renderMarketData(status.marketData, []);
 }).catch(error => toast('Не удалось загрузить состояние: ' + error.message));

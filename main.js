@@ -7,6 +7,16 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataService, normalizeAsset } = require('./core/market-data');
+const { ExampleStore } = require('./core/example-store');
+const { DecisionJournal } = require('./core/decision-journal');
+const { MarketDataStore } = require('./core/market-data-store');
+const { SignalScheduler, normalizeSchedulerConfig } = require('./core/signal-scheduler');
+const { analyzeSituation } = require('./core/matcher');
+const { TradingGate } = require('./core/trading-gate');
+const { TradeLedger } = require('./core/trade-ledger');
+const { ScanStateStore } = require('./core/scan-state-store');
+const { TradeExecutionAdapter } = require('./core/trade-execution');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -20,6 +30,7 @@ const FULL_CHECK_INTERVAL = 5 * 60_000;
 let mainWindow = null;
 let siteWindow = null;
 let miniWindow = null;
+let annotationWindow = null;
 let tray = null;
 let quitting = false;
 let recoveryInProgress = false;
@@ -37,19 +48,36 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+const marketDataService = new MarketDataService();
+let marketDataPublishTimer = null;
+let marketDataSaveTimer = null;
+let shutdownInProgress = false;
+let allowQuit = false;
+let signalScheduler = null;
+let tradeExecutionAdapter = null;
+let tradeLedgerHealthy = true;
+const tradingGate = new TradingGate({ paused: true });
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  autoTradingEnabled: false,
+  baseBet: 1,
+  defaultExpirySeconds: 15
 };
 
 const userRoot = () => app.getPath('userData');
 const logsDir = () => path.join(userRoot(), 'logs');
 const settingsFile = () => path.join(userRoot(), 'settings.json');
 const logFile = () => path.join(logsDir(), 'application.log');
+const exampleStore = new ExampleStore(path.join(userRoot(), 'data', 'examples.json'));
+const decisionJournal = new DecisionJournal(path.join(logsDir(), 'decisions.jsonl'));
+const marketDataStore = new MarketDataStore(marketDataService, path.join(userRoot(), 'data', 'market-data.json'));
+const tradeLedger = new TradeLedger(path.join(userRoot(), 'data', 'trades.json'));
+const scanStateStore = new ScanStateStore(path.join(userRoot(), 'data', 'scan-state.json'));
 
 function log(level, message, data) {
   const row = { at: new Date().toISOString(), level, message: String(message), ...(data ? { data } : {}) };
@@ -58,6 +86,7 @@ function log(level, message, data) {
     fs.appendFileSync(logFile(), JSON.stringify(row) + os.EOL, 'utf8');
   } catch (error) { console.error('Log write failed', error); }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:log', row);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:log', row);
   if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', getPublicStatus());
   console[level === 'error' ? 'error' : 'log']('[PO Background]', row);
 }
@@ -80,6 +109,18 @@ function createMainWindow() {
     if (!quitting) { event.preventDefault(); mainWindow.hide(); log('info', 'Главное окно скрыто в системный трей'); }
   });
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+function createAnnotationWindow() {
+  if (annotationWindow && !annotationWindow.isDestroyed()) { annotationWindow.show(); annotationWindow.focus(); return annotationWindow; }
+  annotationWindow = new BrowserWindow({
+    width: 1420, height: 980, minWidth: 1080, minHeight: 720,
+    show: false, title: APP_NAME + ' — Разметка исторических примеров', backgroundColor: '#0b1020', autoHideMenuBar: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  annotationWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'), { hash: 'annotation' });
+  annotationWindow.once('ready-to-show', () => annotationWindow && annotationWindow.show());
+  annotationWindow.on('closed', () => { annotationWindow = null; });
+  return annotationWindow;
 }
 function createMiniWindow() {
   if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
@@ -131,13 +172,42 @@ function toggleWidget() {
   else miniWindow.show();
   refreshTrayMenu(); publishStatus();
 }
+async function injectMarketDataBridge(win) {
+  const debuggerApi = win.webContents.debugger;
+  try {
+    if (!debuggerApi.isAttached()) debuggerApi.attach('1.3');
+    const captureMode = !!(marketDataCapture && marketDataCapture.attached);
+    const source = (captureMode ? 'window.__PT_CAPTURE_MODE__ = true;\n' : '') + fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
+    await debuggerApi.sendCommand('Page.enable');
+    await debuggerApi.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
+    log('info', 'Перехват рыночных данных установлен до запуска скриптов сайта');
+    return true;
+  } catch (error) {
+    log('error', 'Не удалось установить перехват рыночных данных', String(error));
+    return false;
+  }
+}
+async function attachMarketDataCapture(win) {
+  if (marketDataCapture) marketDataCapture.close();
+  const sink = {
+    ingest: tick => ({ accepted: marketDataService.ingestTicks([{ asset: tick.asset, rawSymbol: tick.rawSymbol, ts: tick.ts, price: tick.price }]) > 0 }),
+    ingestAssets: payload => marketDataService.ingestAssets(payload)
+  };
+  marketDataCapture = new MarketDataCapture({
+    debuggerApi: win.webContents.debugger, marketDataHub: sink, log,
+    onStatus: () => publishMarketDataStatus()
+  });
+  const attached = await marketDataCapture.attach();
+  if (!attached) log('warn', 'CDP market capture недоступен; используется page-bridge fallback', marketDataCapture.getStatus());
+  return attached;
+}
 function injectSiteBridge(win) {
   try {
     const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
     win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
   } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
 }
-function launchSite() {
+async function launchSite() {
   if (siteWindow && !siteWindow.isDestroyed()) {
     siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return;
   }
@@ -152,9 +222,17 @@ function launchSite() {
     }
   });
   siteWindow.webContents.setBackgroundThrottling(false);
+  await attachMarketDataCapture(siteWindow);
+  await injectMarketDataBridge(siteWindow);
+  if (!siteWindow || siteWindow.isDestroyed()) return;
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
-    injectSiteBridge(siteWindow); publishStatus();
+    injectSiteBridge(siteWindow);
+    if (marketDataCapture && !marketDataCapture.attached && ['detached', 'error'].includes(marketDataCapture.getStatus().status)) {
+      const currentWindow = siteWindow;
+      attachMarketDataCapture(currentWindow).then(async attached => { if (attached && currentWindow && !currentWindow.isDestroyed()) { await injectMarketDataBridge(currentWindow); await currentWindow.webContents.executeJavaScript('window.__PT_CAPTURE_MODE__ = true;', true).catch(() => {}); } }).catch(error => log('error', 'Не удалось восстановить CDP capture', String(error)));
+    }
+    publishStatus();
   });
   siteWindow.webContents.on('dom-ready', () => injectSiteBridge(siteWindow));
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
@@ -170,7 +248,7 @@ function launchSite() {
   });
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
-  siteWindow.on('closed', () => { siteWindow = null; refreshTrayMenu(); publishStatus(); });
+  siteWindow.on('closed', () => { if (marketDataCapture) marketDataCapture.close(); marketDataCapture = null; siteWindow = null; refreshTrayMenu(); publishStatus(); });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) { shell.openExternal(url); }
     return { action: 'deny' };
@@ -197,18 +275,19 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
-    reconnectAttempts, update: updateState
+    reconnectAttempts, update: updateState, marketData: { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null }, signalScheduler: signalScheduler ? signalScheduler.getStatus() : null, trading: { enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null }
   };
 }
 function publishStatus() {
   const status = getPublicStatus();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:status', status);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:status', status);
   if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', status);
   return status;
 }
 
 ipcMain.handle('app:get-status', () => getPublicStatus());
-ipcMain.handle('app:launch-site', () => { launchSite(); return { ok: true }; });
+ipcMain.handle('app:launch-site', async () => { await launchSite(); return { ok: true }; });
 ipcMain.handle('app:show-site', () => {
   if (!siteWindow || siteWindow.isDestroyed()) return { ok: false };
   siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return { ok: true };
@@ -250,10 +329,11 @@ ipcMain.handle('app:account:switch', async (_event, target) => {
       type: 'warning', buttons: ['Отмена', 'Перейти на REAL'], defaultId: 0, cancelId: 0,
       title: 'Подтверждение реального счёта',
       message: 'Переключить Pocket Option на REAL?',
-      detail: 'На реальном счёте действия на сайте могут повлечь финансовые последствия. Приложение не совершает сделки автоматически.'
+      detail: 'На реальном счёте действия на сайте могут повлечь финансовые последствия. Автоматическое исполнение в приложении разрешено только для DEMO.'
     });
     if (answer.response !== 1) return { ok: false, cancelled: true };
   }
+  if (mode === 'REAL' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); saveSettings(); log('warn', 'Автоторговля выключена перед переходом на REAL'); }
   log('warn', 'Запрошено переключение счёта', { from: selectedAccount, to: mode });
   try {
     await siteWindow.loadURL(ACCOUNT_URLS[mode]);
@@ -284,12 +364,189 @@ function isTrustedPocketOptionSender(event) {
   try { const host = new URL(siteWindow.webContents.getURL()).hostname; return host === 'pocketoption.com' || host.endsWith('.pocketoption.com'); }
   catch (_) { return false; }
 }
+
+function isTrustedControlSender(event) {
+  return [mainWindow, annotationWindow].some(win => !!(win && !win.isDestroyed() && event.sender === win.webContents));
+}
+function publishMarketDataStatus() {
+  if (marketDataPublishTimer || !mainWindow || mainWindow.isDestroyed()) return;
+  marketDataPublishTimer = setTimeout(() => {
+    marketDataPublishTimer = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:market-data', { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null });
+    if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:market-data', { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null });
+    publishStatus();
+  }, 1000);
+}
+ipcMain.on('site:market-data', (event, payload) => {
+  if (!isTrustedPocketOptionSender(event)) return;
+  if (!payload || payload.version !== 1 || !['updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast', 'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2', 'successcloseOrder', 's_orders/close'].includes(payload.eventName) || !Array.isArray(payload.payload) || payload.payload.length > 5000) return;
+  try {
+    if (payload.eventName === 'successcloseOrder' || payload.eventName === 's_orders/close') {
+      if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo') { log('warn', 'Close event ignored: current account is not verified DEMO', { selectedAccount, accountType: lastBalance && lastBalance.accountType }); return; }
+      const closeRows = Array.isArray(payload.payload) ? payload.payload : [payload.payload];
+      const balanceRow = closeRows.find(row => row && Number.isFinite(Number(row.balance)) && Number(row.balance) >= 0);
+      if (balanceRow) { lastBalance = { accountType: lastBalance && lastBalance.accountType || String(selectedAccount).toLowerCase(), balance: Number(balanceRow.balance), currency: lastBalance && lastBalance.currency || '', ts: Date.now() }; publishStatus(); }
+      if (tradeExecutionAdapter) tradeExecutionAdapter.handleCloseEvent(payload.payload).catch(error => log('error', 'Ошибка обработки результата сделки', String(error)));
+      return;
+    }
+    const result = marketDataService.ingestEvent(payload.eventName, payload.payload);
+    if (result.accepted > 0) publishMarketDataStatus();
+  } catch (error) { log('warn', 'Некорректное сообщение рыночных данных', String(error)); }
+});
+ipcMain.handle('app:market-data:get-status', event => {
+  if (!isTrustedControlSender(event)) return { connected: false, error: 'untrusted_sender' };
+  return { ...marketDataService.getStatus(), capture: marketDataCapture ? marketDataCapture.getStatus() : null };
+});
+ipcMain.handle('app:market-data:list-assets', (event, options = {}) => {
+  if (!isTrustedControlSender(event)) return [];
+  return marketDataService.listAssets({ otcOnly: options && options.otcOnly === true });
+});
+ipcMain.handle('app:market-data:get-candles', (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new TypeError('Некорректный запрос');
+    const candles = marketDataService.getCandles(request.asset, request.timeframe, {
+      limit: request.limit == null ? 500 : request.limit,
+      includeIncomplete: request.includeIncomplete === true,
+      asOf: request.asOf
+    });
+    return { ok: true, candles };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+
+ipcMain.handle('app:examples:list', async (event, filters = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    const timeframe = filters.timeframe == null ? undefined : String(filters.timeframe).toUpperCase();
+    const pair = filters.pair == null ? undefined : normalizeAsset(filters.pair);
+    if (filters.pair != null && !pair) throw new TypeError('Некорректная валютная пара');
+    return { ok: true, examples: await exampleStore.list({ timeframe, pair }) };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:add', async (event, example) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, example: await exampleStore.add(example) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:update', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request.id !== 'string' || !request.patch || typeof request.patch !== 'object' || Array.isArray(request.patch)) throw new TypeError('Некорректный запрос изменения примера');
+    return { ok: true, example: await exampleStore.update(request.id, request.patch) };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:examples:remove', async (event, id) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, removed: await exampleStore.remove(String(id || '')) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:matcher:analyze', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    if (!request || typeof request !== 'object' || Array.isArray(request)) throw new TypeError('Некорректный запрос анализа');
+    const asset = normalizeAsset(request.asset);
+    const timeframe = String(request.timeframe || '').toUpperCase();
+    if (!asset) throw new TypeError('Некорректная валютная пара');
+    const entryAt = request.entryAt == null ? Date.now() : Number(request.entryAt);
+    const lookback = request.lookback == null ? 30 : Number(request.lookback);
+    if (!Number.isFinite(entryAt) || entryAt <= 0 || !Number.isInteger(lookback) || lookback < 2 || lookback > 10000) throw new RangeError('Некорректная точка входа или размер окна');
+    const candles = marketDataService.getCandles(asset, timeframe, { asOf: entryAt, limit: lookback });
+    if (candles.length < 2) return { ok: false, reason: 'insufficient_market_data', availableCandles: candles.length };
+    const examples = await exampleStore.list({ timeframe });
+    if (request.config != null && (!request.config || typeof request.config !== 'object' || Array.isArray(request.config))) throw new TypeError('config должен быть объектом');
+    const decision = analyzeSituation({ candles, timeframe, entryAt, examples, config: request.config || {} });
+    const snapshot = { ...decision.settingsSnapshot, asset, timeframe, entryAt, lookback, algorithmVersion: 1 };
+    const journal = await decisionJournal.append('DECISION', { asset, ...decision }, snapshot);
+    return { ok: true, decision, journalId: journal.id };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:annotation:open-window', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  createAnnotationWindow(); return { ok: true };
+});
+ipcMain.handle('app:analysis:get-config', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, config: normalizeSchedulerConfig(settings.analysisConfig || {}) }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:set-config', (event, next = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try {
+    const config = normalizeSchedulerConfig(next);
+    settings.analysisConfig = {
+      enabled: config.enabled, timeframes: config.timeframes.slice(), lookback: config.lookback,
+      maxOpenTrades: config.maxOpenTrades, scanIntervalMs: config.scanIntervalMs,
+      matcher: { ...config.matcher }
+    };
+    saveSettings();
+    if (signalScheduler) { signalScheduler.stop(); signalScheduler.start(); }
+    publishStatus();
+    return { ok: true, config };
+  } catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:scan-now', async event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  try { return { ok: true, result: signalScheduler ? await signalScheduler.scan() : null }; }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+ipcMain.handle('app:analysis:get-recent', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  return { ok: true, decisions: signalScheduler ? signalScheduler.getRecentDecisions() : [] };
+});
+ipcMain.handle('app:trading:get-state', event => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  return { ok: true, enabled: settings.autoTradingEnabled === true, ledgerHealthy: tradeLedgerHealthy, config: { baseBet: settings.baseBet, defaultExpirySeconds: settings.defaultExpirySeconds }, gate: tradingGate.getState(), execution: tradeExecutionAdapter ? tradeExecutionAdapter.getState() : null, account: { selected: selectedAccount, detected: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, balanceAt: lastBalance && lastBalance.ts, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }, stats: tradeLedger.getStats(), openTrades: tradeLedger.listOpen() };
+});
+ipcMain.handle('app:trading:set-enabled', async (event, enabled) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (enabled !== true && enabled !== false) return { ok: false, reason: 'invalid_enabled_value' };
+  if (enabled) {
+    if (!tradeLedgerHealthy) return { ok: false, reason: 'trade_ledger_unavailable' };
+    const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
+    if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_account_not_verified' };
+    if (tradeLedger.listOpen().length >= Number(settings.analysisConfig && settings.analysisConfig.maxOpenTrades || 1)) return { ok: false, reason: 'open_trade_limit_reached_or_unresolved_trades' };
+    settings.autoTradingEnabled = true; tradingGate.setPaused(false);
+  } else { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); }
+  saveSettings(); publishStatus();
+  return { ok: true, enabled: settings.autoTradingEnabled, gate: tradingGate.getState() };
+});
+ipcMain.handle('app:trading:set-paused', async (event, paused) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (typeof paused !== 'boolean') return { ok: false, reason: 'invalid_paused_value' };
+  if (!paused) {
+    const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
+    if (settings.autoTradingEnabled !== true || selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_auto_trading_not_armed' };
+  }
+  tradingGate.setPaused(paused); if (paused && tradeExecutionAdapter) await tradeExecutionAdapter.cancelInFlight(); publishStatus();
+  return { ok: true, gate: tradingGate.getState() };
+});
+ipcMain.handle('app:trading:set-config', (event, config = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return { ok: false, reason: 'invalid_config' };
+  const baseBet = Number(Number(config.baseBet).toFixed(2)), expiry = Number(config.defaultExpirySeconds);
+  if (!Number.isFinite(baseBet) || baseBet <= 0 || baseBet > 100000 || !Number.isInteger(expiry) || expiry < 1 || expiry > 86400) return { ok: false, reason: 'invalid_trade_settings' };
+  settings.baseBet = baseBet; settings.defaultExpirySeconds = expiry; saveSettings();
+  return { ok: true, baseBet, defaultExpirySeconds: expiry };
+});
+ipcMain.handle('app:trading:resolve', async (event, request = {}) => {
+  if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
+  if (!request || typeof request !== 'object' || Array.isArray(request) || typeof request.tradeId !== 'string') return { ok: false, reason: 'invalid_request' };
+  const trade = tradeLedger.listOpen().find(x => x.tradeId === request.tradeId);
+  if (!trade || trade.status !== 'UNKNOWN_AFTER_RESTART') return { ok: false, reason: 'trade_not_recoverable_or_not_unknown' };
+  try { return await tradeExecutionAdapter.resolveUnknown(request.tradeId, request.action, request.profit); }
+  catch (error) { return { ok: false, reason: String(error.message || error) }; }
+});
+
+
+
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
   if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
   if (payload.ts && payload.ts < (lastBalance?.ts || 0)) return;
   lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
-  lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
+  lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase();
+  if (payload.accountType !== 'demo' && settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; tradingGate.setPaused(true); if (tradeExecutionAdapter) tradeExecutionAdapter.cancelInFlight().catch(error => log('error', 'Не удалось отменить вход при смене счёта', String(error))); saveSettings(); log('warn', 'Автоторговля автоматически отключена: обнаружен не-DEMO счёт'); }
+  publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
@@ -427,17 +684,32 @@ async function runFullCheck(source) {
     const moduleChecks = await moduleManager.healthChecks();
     for (const item of moduleChecks) checks.push(item);
   }
-  checks.push({ name: 'Торговое ядро', ok: true, state: 'not-connected', detail: 'Не подключено в этой сборке: приложение не содержит модуль автоторговли и не совершает сделки' });
+  checks.push({ name: 'Анализ сигналов', ok: !!signalScheduler, state: signalScheduler ? 'active' : 'not-connected', detail: 'Непрерывный анализ OTC работает; автоматическое исполнение сделок ещё не подключено' });
+  checks.push({ name: 'Непрерывный анализ OTC', ok: !!(signalScheduler && signalScheduler.getStatus().running), detail: signalScheduler ? JSON.stringify(signalScheduler.getStatus()) : 'Не запущен' });
+  checks.push({ name: 'Рыночные данные', ok: true, state: marketDataService.getStatus().connected ? 'connected' : 'waiting', detail: JSON.stringify(marketDataService.getStatus()) });
+  const demoTradeSafe = settings.autoTradingEnabled !== true || (selectedAccount === 'DEMO' && lastBalance && lastBalance.accountType === 'demo' && siteWindow && !siteWindow.isDestroyed() && siteWindow.webContents.getURL().includes('/demo-quick-high-low/') && tradeLedgerHealthy);
+  checks.push({ name: 'DEMO execution guard', ok: demoTradeSafe, detail: settings.autoTradingEnabled ? 'Автоторговля вооружена только при подтверждённом DEMO и исправном журнале' : 'Автоторговля выключена' });
   const result = { at: new Date().toISOString(), source, passed: checks.every(c => c.ok !== false), checks };
   log(result.passed ? 'info' : 'warn', 'Проверка устойчивости завершена', result);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:check-result', result);
+  if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:check-result', result);
   return result;
 }
 
-app.on('before-quit', () => {
-  quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
-  if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
-  log('info', 'Приложение завершает работу');
+app.on('before-quit', event => {
+  if (allowQuit) return;
+  event.preventDefault();
+  if (shutdownInProgress) return;
+  shutdownInProgress = true; quitting = true;
+  clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer);
+  if (signalScheduler) signalScheduler.stop();
+  clearInterval(marketDataSaveTimer); clearTimeout(updateCheckTimeout); clearTimeout(marketDataPublishTimer);
+  settings.autoTradingEnabled = false; tradingGate.setPaused(true); try { saveSettings(); } catch (error) { log('error', 'Не удалось сохранить безопасное состояние торговли', String(error)); }
+  log('info', 'Приложение завершает работу; сохраняем рыночные данные');
+  const tasks = [marketDataStore.save().catch(error => log('error', 'Не удалось сохранить рыночные данные', String(error)))];
+  if (tradeExecutionAdapter) tasks.push(tradeExecutionAdapter.cancelInFlight().catch(error => log('error', 'Не удалось отменить активную команду сделки при завершении', String(error))));
+  if (moduleManager) tasks.push(moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error))));
+  Promise.allSettled(tasks).then(() => { allowQuit = true; app.quit(); });
 });
 app.on('window-all-closed', () => { /* системный трей удерживает приложение открытым */ });
 app.on('activate', showMain);
@@ -446,12 +718,44 @@ const lock = app.requestSingleInstanceLock();
 if (!lock) app.quit();
 else app.whenReady().then(async () => {
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
-  loadSettings(); createMainWindow(); createTray();
+  loadSettings();
+  if (settings.autoTradingEnabled === true) { settings.autoTradingEnabled = false; saveSettings(); log('warn', 'Автоторговля отключена при запуске; требуется повторное включение в DEMO'); }
+  try { const restored = await marketDataStore.load(); if (restored) log('info', 'Рыночные данные восстановлены из локального снимка', { ticks: restored.tickCount, historyCandles: restored.historyCandleCount }); }
+  catch (error) { log('error', 'Снимок рыночных данных повреждён или несовместим; запускаем пустой буфер', String(error)); }
+  try { await tradeLedger.load(); const openTrades = tradeLedger.listOpen(); if (openTrades.length) { tradingGate.restoreOpenTrades(openTrades); log('warn', 'Обнаружены незавершённые DEMO сделки; торговля остаётся на паузе', { count: openTrades.length }); } }
+  catch (error) { tradeLedgerHealthy = false; tradingGate.setPaused(true); settings.autoTradingEnabled = false; log('error', 'Не удалось восстановить журнал сделок; автоторговля заблокирована', String(error)); }
+  createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
+  tradeExecutionAdapter = new TradeExecutionAdapter({
+    gate: tradingGate, marketData: marketDataService, journal: decisionJournal, ledger: tradeLedger,
+    getSettings: () => settings,
+    getAccount: () => ({ mode: selectedAccount, accountType: lastBalance && lastBalance.accountType, balance: lastBalance && lastBalance.balance, balanceAt: lastBalance && lastBalance.ts, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
+    getSiteWindow: () => siteWindow,
+    onUpdate: item => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:trade-update', item); if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:trade-update', item); log('info', 'Обновление состояния сделки', item); }
+  });
+  tradeExecutionAdapter.restore(tradeLedger.listOpen());
+  signalScheduler = new SignalScheduler({
+    marketData: marketDataService, exampleStore, journal: decisionJournal, stateStore: scanStateStore,
+    getOpenTradeCount: () => { const gateState = tradingGate.getState(); return gateState.openTrades + gateState.pendingReservations; },
+    getConfig: () => settings.analysisConfig || {},
+    onDecision: item => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:signal-decision', item);
+      if (annotationWindow && !annotationWindow.isDestroyed()) annotationWindow.webContents.send('app:signal-decision', item);
+      if (settings.autoTradingEnabled === true && item.decision && item.decision.accepted === true && item.withinConfiguredLimit === true && tradeExecutionAdapter) {
+        tradeExecutionAdapter.execute(item).catch(error => log('error', 'Ошибка отправки DEMO-сделки', String(error)));
+      }
+    },
+    onError: error => log('error', 'Ошибка непрерывного анализа OTC', String(error))
+  });
+  try { const scanState = await signalScheduler.restoreState(); log('info', 'Восстановлено состояние обработанных баров', scanState); } catch (error) { log('error', 'Не удалось восстановить scan state', String(error)); }
+  try { const persistedDecisions = await decisionJournal.readRecent(100000); const restored = signalScheduler.restoreProcessedDecisions(persistedDecisions); log('info', 'Восстановлена дедупликация обработанных баров', restored); } catch (error) { log('error', 'Не удалось восстановить дедупликацию решений', String(error)); }
+  try { signalScheduler.start(); }
+  catch (error) { log('error', 'Сохранённые параметры анализа некорректны; применяем безопасные настройки по умолчанию', String(error)); settings.analysisConfig = {}; signalScheduler.start(); }
   if (settings.showMiniWidget) createMiniWindow().show();
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  marketDataSaveTimer = setInterval(() => marketDataStore.save().catch(error => log('error', 'Периодическое сохранение рыночных данных не удалось', String(error))), 60_000);
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
   runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
   configureUpdateChecks();

@@ -11,6 +11,8 @@
     <nav id="nav">
       <button class="nav-item active" data-page="home"><span>⌂</span>Главная</button>
       <button class="nav-item" data-page="monitor"><span>◉</span>Мониторинг</button>
+      <button class="nav-item" data-page="market"><span>⌁</span>Рыночные данные</button>
+      <button class="nav-item" data-page="annotation"><span>✎</span>Разметка примеров</button>
       <button class="nav-item" data-page="logs"><span>≋</span>Журналы</button>
       <button class="nav-item" data-page="settings"><span>⚙</span>Настройки</button>
       <button class="nav-item" data-page="updates"><span>↻</span>Обновления</button>
@@ -46,6 +48,87 @@
       <div class="page-intro"><h2>Мониторинг устойчивости</h2><p>Полная проверка выполняется автоматически каждые 5 минут. Проверка сети и восстановления — чаще.</p><button class="btn primary" id="run-check">Запустить проверку сейчас</button></div>
       <div id="check-summary" class="check-summary">Ожидание первой проверки</div><div id="check-list" class="check-list"></div>
     </section>
+    <section class="page" id="page-market">
+      <div class="page-intro row-between"><div><h2>Поток рыночных данных</h2><p>Котировки, которые Pocket Option передаёт по WebSocket для нескольких активов одновременно.</p></div><button class="btn secondary" id="refresh-market">Обновить</button></div>
+      <div class="stats-grid market-stats">
+        <article class="stat-card"><span class="stat-label">АКТИВЫ В КАТАЛОГЕ</span><div class="stat-value" id="market-assets-count">0</div><small>Все инструменты</small></article>
+        <article class="stat-card"><span class="stat-label">OTC АКТИВЫ</span><div class="stat-value" id="market-otc-count">0</div><small>Определены по символу/названию</small></article>
+        <article class="stat-card"><span class="stat-label">АКТИВЫ С ТИКАМИ</span><div class="stat-value" id="market-tick-assets">0</div><small>Получают цены</small></article>
+        <article class="stat-card"><span class="stat-label">ТИКИ В ПАМЯТИ</span><div class="stat-value" id="market-tick-count">0</div><small>Ограниченный буфер текущего сеанса</small></article>
+      </div>
+      <div id="market-connection" class="check-summary">Ожидание рыночных данных</div>
+      <article class="panel-card"><div class="panel-head"><div><h3>OTC инструменты</h3><p>Количество принятых тиков для каждого инструмента</p></div></div><div id="market-assets-list" class="all-logs"><div class="empty">Каталог пока не получен</div></div></article>
+    </section>
+    <section class="page" id="page-annotation">
+      <div class="page-intro"><h2>Ручная разметка исторических ситуаций</h2><p>Выбери участок свечей, точку входа и направление. Каждый пример сохраняется независимо; для поиска используются только свечи до входа.</p></div>
+      <div class="panel-card analysis-monitor-config">
+        <div class="panel-head"><div><h3>Непрерывный анализ OTC-пар</h3><p>Работает независимо от паузы торговли. Анализирует новые закрытые свечи выбранных таймфреймов.</p></div><div class="panel-actions"><button class="btn secondary" id="annotation-open-window">Открыть отдельное окно разметки</button><button class="btn primary" id="analysis-save">Сохранить параметры</button></div></div>
+        <div class="annotation-toolbar">
+          <label>Таймфреймы<select id="analysis-timeframes" multiple size="5"><option selected>S5</option><option selected>S10</option><option selected>S15</option><option selected>S30</option><option selected>M1</option><option selected>M2</option><option selected>M3</option><option selected>M5</option><option selected>M10</option><option selected>M15</option></select></label>
+          <label>Окно истории<input id="analysis-lookback" type="number" min="30" max="10000" value="300"></label>
+          <label>Интервал сканирования, мс<input id="analysis-interval" type="number" min="250" max="10000" value="1000"></label>
+          <label>Лимит сигналов для отбора 1–10<input id="analysis-max-candidates" type="number" min="1" max="10" value="1"></label>
+        </div>
+        <div id="analysis-monitor-status" class="muted">Загрузка параметров непрерывного анализа…</div>
+      </div>
+      <div class="panel-card live-signals-panel"><div class="panel-head"><div><h3>Решения по новым свечам</h3><p>Положительные и отклонённые сигналы с причинами</p></div><button class="btn secondary" id="analysis-scan-now">Проверить сейчас</button></div><div id="live-signals" class="all-logs"><div class="empty">Ожидание новых закрытых свечей</div></div></div>
+      <div class="panel-card trading-control">
+        <div class="panel-head"><div><h3>Автоматическая торговля</h3><p>Только DEMO. REAL-счёт заблокирован. При запуске приложения автоторговля всегда выключена.</p></div><span id="trading-badge" class="status-pill">ВЫКЛЮЧЕНА</span></div>
+        <div class="annotation-toolbar">
+          <label>Сумма сделки<input id="trading-base-bet" type="number" min="0.01" max="100000" step="0.01" value="1"></label>
+          <label>Экспирация, секунд<input id="trading-expiry" type="number" min="1" max="86400" value="15"></label>
+          <button class="btn secondary" id="trading-save-config">Сохранить параметры</button>
+          <button class="btn primary" id="trading-enable">Включить DEMO автоторговлю</button>
+          <button class="btn ghost" id="trading-pause" disabled>Пауза</button>
+        </div>
+        <div id="trading-state" class="muted">Проверка DEMO-счёта…</div>
+        <div class="trading-summary" id="trading-stats"></div><div id="trading-curve"></div><details id="trading-breakdown"><summary>Подробная статистика по парам, таймфреймам и другим параметрам</summary><div id="trading-breakdown-content"></div></details>
+        <div id="trading-open-list" class="all-logs"><div class="empty">Открытых или ожидающих сделок нет</div></div>
+      </div>
+      <div class="annotation-toolbar panel-card">
+        <label>OTC пара<select id="annotation-pair"><option value="">Загрузка активов…</option></select></label>
+        <label>Таймфрейм<select id="annotation-timeframe"><option>S5</option><option>S10</option><option>S15</option><option>S30</option><option>M1</option><option>M2</option><option>M3</option><option>M5</option><option>M10</option><option>M15</option></select></label>
+        <label>Свечей<input id="annotation-lookback" type="number" min="20" max="10000" value="300"></label>
+        <button class="btn primary" id="annotation-load">Загрузить график</button>
+      </div>
+      <div class="annotation-grid">
+        <div class="panel-card">
+          <div class="panel-head"><div><h3>График</h3><p id="annotation-chart-status">Сначала загрузи рыночные данные</p></div><button class="btn ghost" id="annotation-clear">Сбросить выбор</button></div>
+          <div class="annotation-tools">
+            <button class="mode-btn active" data-annotation-mode="start">Начало участка</button>
+            <button class="mode-btn" data-annotation-mode="end">Конец участка</button>
+            <button class="mode-btn" data-annotation-mode="entry">Точка входа</button>
+            <span id="annotation-selection">Ничего не выбрано</span>
+          </div>
+          <div id="annotation-chart" class="annotation-chart"><div class="empty">Нет загруженных свечей</div></div>
+        </div>
+        <div class="panel-card annotation-editor">
+          <h3 id="annotation-editor-title">Новый пример</h3>
+          <label>Направление<select id="annotation-direction"><option value="UP">ВВЕРХ</option><option value="DOWN">ВНИЗ</option></select></label>
+          <label>Экспирация, секунд<input id="annotation-expiry" type="number" min="1" max="86400" value="15"></label>
+          <label>Исторический результат<select id="annotation-outcome"><option value="UNKNOWN">Не оценён</option><option value="WIN">Выигрыш</option><option value="LOSS">Проигрыш</option><option value="DRAW">Ничья</option></select></label>
+          <button class="btn primary" id="annotation-save">Сохранить пример</button>
+          <button class="btn secondary" id="annotation-cancel-edit" hidden>Отменить редактирование</button>
+          <div id="annotation-save-status" class="muted"></div>
+        </div>
+      </div>
+      <div class="panel-card annotation-examples">
+        <div class="panel-head"><div><h3>Сохранённые примеры</h3><p>Независимая пользовательская база</p></div><button class="btn secondary" id="annotation-refresh-examples">Обновить</button></div>
+        <div id="annotation-examples-list" class="all-logs"><div class="empty">Примеров пока нет</div></div>
+      </div>
+      <div class="panel-card annotation-analysis">
+        <div class="panel-head"><div><h3>Поиск похожих ситуаций</h3><p>Сравнение выполняется только внутри выбранного таймфрейма и по общей базе пар</p></div></div>
+        <div class="annotation-toolbar">
+          <label>Свечей в паттерне<input id="matcher-pattern-length" type="number" min="2" max="500" value="30"></label>
+          <label>Top-N<input id="matcher-topk" type="number" min="1" max="100" value="10"></label>
+          <label>Порог сходства, %<input id="matcher-threshold" type="number" min="0" max="100" value="80"></label>
+          <label>Минимум примеров<input id="matcher-min-examples" type="number" min="1" max="100" value="3"></label>
+          <label>Голосов за направление<input id="matcher-min-votes" type="number" min="1" max="100" value="6"></label>
+          <button class="btn primary" id="annotation-analyze">Найти совпадения</button>
+        </div>
+        <div id="annotation-analysis-result" class="all-logs"><div class="empty">Результаты анализа появятся здесь</div></div>
+      </div>
+    </section>
     <section class="page" id="page-logs">
       <div class="page-intro row-between"><div><h2>Журнал событий</h2><p>Ошибки, соединение, переключение счёта и проверки</p></div><button class="btn secondary" id="export-logs">Экспортировать ZIP</button></div>
       <div class="log-toolbar"><input id="log-filter" placeholder="Поиск по журналу…"><select id="log-level"><option value="all">Все события</option><option value="error">Ошибки</option><option value="warn">Предупреждения</option><option value="info">Информация</option></select></div>
@@ -70,5 +153,5 @@
     <footer>POCKET OPTION BACKGROUND <span>Локальная сессия · Без автозапуска Windows</span></footer>
   </main>
 </div>
-<div id="toast" class="toast"></div><script src="app.js"></script>
+<div id="toast" class="toast"></div><script src="app.js"></script><script src="annotation.js"></script>
 </body></html>

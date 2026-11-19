@@ -1,44 +1,42 @@
 # Тестирование и подтверждение
 
-## Срез на 2026-11-19
+## Статус
+Автоматическая проверка кода на commit `9f9e6fafcc0b8559bd14c2c76d059bae006183bb` в ветке `work/pattern-engine-foundation` завершилась успешно. После этого commit были проверены совпадающие SHA основных runtime-файлов (main.js, market-data-bridge.js, trade-execution.js, trade-ledger.js, signal-scheduler.js, package.json). Документационные обновления не меняют исполняемый код.
 
-### Проверено чтением исходников GitHub
-- [x] README и package.json основного репозитория.
-- [x] main.js (файл получен; отдельные IPC и lifecycle требуют полного прохода для соответствующих задач).
-- [x] preload.js, site-preload.js, site-bridge.js.
-- [x] renderer/app.js (получен; полный проход потребуется для UI-задач).
-- [x] modules/manager.js и modules/README.md.
-- [x] Developer Guide и User Guide.
-- [x] pocket-tracker 3.6.0_0/manifest.json и ARCHITECTURE.md.
+## Автоматизированные тесты
+- `node:test` покрывает timeframes, market data/tick aggregation, CDP multi-socket capture, OTC AssetCatalog, Socket.IO text/binary decoder, OHLC store, pattern normalization, matcher/look-ahead, example store, signal scheduler, decision journal, page bridge, trading gate, DEMO execution adapter, scan-state recovery и TradeLedger.
+- Отдельные проверки покрывают запрет REAL, явное включение DEMO, сериализацию команд, отмену in-flight команды при паузе, сверку после перезапуска, fail-closed DOM asset mismatch и отказ от неоднозначной корреляции.
+- `npm run check` проверяет синтаксис main/preload/site bridge/market-data bridge/core и renderer annotation.
+- `npm test` запускает unit-тесты.
+- `npm run dist` должен собрать Windows x64 installer в CI.
 
-### Подтверждено
-Структура приложения, разделение Electron/Chrome, узкий preload API, DOM-адаптер баланса, модульный менеджер и описанный механизм WebSocket/DOM расширения.
+## Проверено чтением исходников
+- [x] Основной README/package.json и архитектура Electron.
+- [x] main/preload/site-preload/site-bridge/renderer.
+- [x] pocket-tracker 3.6.0 inject.js и ARCHITECTURE.md: WebSocket, updateAssets/updateStream, history, DOM selectors и executeTrade flow.
+- [x] Новые core модули и тестовые сценарии проверены чтением исходников.
+- [x] ScanStateStore и восстановление dedup баров добавлены в unit tests.
 
-### Не запускалось или не подтверждено
-- [ ] npm install.
-- [ ] npm run check локально.
-- [ ] npm start.
-- [ ] npm run pack / npm run dist.
-- [ ] запуск на Windows 11 x64.
-- [ ] интеграция с текущим Pocket Option.
-- [ ] end-to-end рыночные данные.
-- [ ] DEMO сделки.
-- [ ] REAL сделки.
+## Не подтверждено runtime
+- [x] GitHub Actions run `44607178193` для commit `9f9e6fafcc0b8559bd14c2c76d059bae006183bb`: `npm run check` успешно, `npm test` — 65 passed / 0 failed, Windows installer build — успешно.
+- [ ] CDP attach/injection на живой странице Pocket Option.
+- [ ] Реальный одновременный updateStream нескольких OTC-пар.
+- [ ] Исторические свечи по всем десяти таймфреймам и нескольким парам.
+- [ ] Отдельное окно разметки на Windows и длинных диапазонах.
+- [ ] Реальное переключение OTC пары через changeSymbol и DOM подтверждение.
+- [ ] Сумма, экспирация и правильная UP/DOWN кнопка на текущем сайте.
+- [ ] Фактическое открытие DEMO ордера и close-event payload.
+- [ ] Однозначная корреляция закрытия нескольких сделок по разным парам.
+- [ ] Полный Windows x64 smoke test и soak test.
 
-Нельзя считать пункт проверенным только потому, что он описан в документации или CI.
+## Протокол
+Для каждого изменения фиксировать актуальный commit, workflow run, среду, команду/сценарий, результат и непроверенные пункты. Не считать тест пройденным только по наличию тестового файла или по результату предыдущего commit.
 
-## Протокол будущих проверок
-Для каждой задачи записывать среду, команду/сценарий, результат, проверенные ограничения и непроверенные пункты.
-
-Минимум:
-1. Синтаксическая проверка изменённых JS.
-2. Unit tests алгоритмов и валидаторов.
-3. Тесты схемы и миграций хранилища.
-4. IPC tests для sender, типов и диапазонов payload.
-5. Market Data tests на обезличенных fixtures.
-6. Тесты отсутствия look-ahead leakage.
-7. Пауза: анализ продолжает работать, новые сделки блокируются.
-8. Идемпотентность сигналов и лимит одновременных сделок.
-9. DEMO end-to-end до рассмотрения REAL.
-
-Тесты реальной торговли не запускать без отдельного согласования.
+## Последний автоматический прогон
+- Branch: `work/pattern-engine-foundation`
+- Commit: `9f9e6fafcc0b8559bd14c2c76d059bae006183bb`
+- Workflow run: `44607178193` — success
+- Unit tests: 65/65 passed
+- JavaScript syntax: passed
+- Windows installer build: passed
+- Live Pocket Option DEMO smoke test: не проводился; это остаётся обязательным runtime этапом.

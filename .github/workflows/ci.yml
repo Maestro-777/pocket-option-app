@@ -27,5 +27,8 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check
 
+      - name: Run unit tests
+        run: npm test
+
       - name: Build Windows installer
         run: npm run dist
