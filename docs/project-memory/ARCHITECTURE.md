@@ -11,8 +11,8 @@
 - Постоянная сессия Electron: `persist:pocket-option-background`.
 - `main.js`: главный процесс, окна, lifecycle, трей, IPC, настройки, журналы, мониторинг/восстановление, обновления, загрузка модулей.
 - `preload.js`: ограниченный `window.pocketApp` через contextBridge и `ipcRenderer.invoke`.
-- `site-preload.js`: проверяет source/origin, тип сообщения и поля баланса/лога перед IPC.
-- `site-bridge.js`: DOM-адаптер баланса/типа счёта с MutationObserver и периодическим опросом.
+- `site-preload.js`: в изолированном preload world читает DOM баланса/типа счёта, нормализует значения и напрямую отправляет ограниченные IPC-события. Main-world `window.postMessage` мост удалён, чтобы страница не могла напрямую подделывать привилегированные сообщения.
+- `site-bridge.js`: удалён как небезопасный main-world адаптер.
 - `renderer/app.js`, `index.html`, `styles.css`: интерфейс панели.
 - `renderer/widget.js/html`: мини-виджет.
 - `modules/manager.js`: загрузка, health-check и остановка модулей.
