@@ -43,11 +43,12 @@
     $('trading-stats').innerHTML = '<span>Закрыто: ' + Number(stats.total || 0) + '</span><span>WIN: ' + Number(stats.wins || 0) +
       '</span><span>LOSS: ' + Number(stats.losses || 0) + '</span><span>DRAW: ' + Number(stats.draws || 0) +
       '</span><span>Win rate: ' + Number(stats.winRate || 0).toFixed(1) + '%</span><span>Чистый результат DEMO: ' + Number(stats.netProfit || 0).toFixed(2) + '</span>';
-    const curve = stats.curve || [];
+    const actualBalanceCurve = stats.balanceCurve || [];
+    const curve = actualBalanceCurve.length ? actualBalanceCurve : (stats.curve || []);
     if (curve.length) {
-      const values = curve.map(x => Number(x.cumulative || 0)), low = Math.min(0, ...values), high = Math.max(0, ...values), span = Math.max(high-low, 0.000001);
+      const values = curve.map(x => Number(actualBalanceCurve.length ? x.balance : x.cumulative || 0)), low = Math.min(0, ...values), high = Math.max(0, ...values), span = Math.max(high-low, 0.000001);
       const points = values.map((v,i) => (curve.length === 1 ? 50 : i/(curve.length-1)*100).toFixed(2) + ',' + (29-(v-low)/span*26).toFixed(2)).join(' ');
-      $('trading-curve').innerHTML = '<small>Кривая накопленного результата по закрытым сделкам</small><svg viewBox="0 0 100 32" preserveAspectRatio="none"><polyline points="' + points + '" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>';
+      $('trading-curve').innerHTML = '<small>' + (actualBalanceCurve.length ? 'Баланс по подтверждённым снимкам сайта после закрытия' : 'Кривая накопленного результата по закрытым сделкам') + '</small><svg viewBox="0 0 100 32" preserveAspectRatio="none"><polyline points="' + points + '" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>';
     } else $('trading-curve').innerHTML = '<small>Кривая доходности появится после первых закрытых сделок</small>';
     const groups = [['По валютным парам',stats.byPair],['По таймфреймам',stats.byTimeframe],['По направлениям',stats.byDirection],['По экспирации',stats.byExpiry],['По уровню сходства',stats.bySimilarity]];
     $('trading-breakdown-content').innerHTML = groups.map(([title,rows]) => '<section class="trading-stat-group"><b>' + title + '</b>' +
