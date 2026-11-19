@@ -53,6 +53,7 @@ let shutdownInProgress = false;
 let allowQuit = false;
 let signalScheduler = null;
 let tradeExecutionAdapter = null;
+let tradeLedgerHealthy = true;
 const tradingGate = new TradingGate({ paused: true });
 let settings = {
   showMiniWidget: false,
@@ -452,6 +453,7 @@ ipcMain.handle('app:trading:set-enabled', (event, enabled) => {
   if (!isTrustedControlSender(event)) return { ok: false, reason: 'untrusted_sender' };
   if (enabled !== true && enabled !== false) return { ok: false, reason: 'invalid_enabled_value' };
   if (enabled) {
+    if (!tradeLedgerHealthy) return { ok: false, reason: 'trade_ledger_unavailable' };
     const url = siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '';
     if (selectedAccount !== 'DEMO' || !lastBalance || lastBalance.accountType !== 'demo' || !url.includes('/demo-quick-high-low/')) return { ok: false, reason: 'demo_account_not_verified' };
     if (tradeLedger.listOpen().length >= Number(settings.analysisConfig && settings.analysisConfig.maxOpenTrades || 1)) return { ok: false, reason: 'open_trade_limit_reached_or_unresolved_trades' };
@@ -658,7 +660,7 @@ else app.whenReady().then(async () => {
   try { const restored = await marketDataStore.load(); if (restored) log('info', 'Рыночные данные восстановлены из локального снимка', { ticks: restored.tickCount, historyCandles: restored.historyCandleCount }); }
   catch (error) { log('error', 'Снимок рыночных данных повреждён или несовместим; запускаем пустой буфер', String(error)); }
   try { await tradeLedger.load(); const openTrades = tradeLedger.listOpen(); if (openTrades.length) { tradingGate.restoreOpenTrades(openTrades); log('warn', 'Обнаружены незавершённые DEMO сделки; торговля остаётся на паузе', { count: openTrades.length }); } }
-  catch (error) { tradingGate.setPaused(true); settings.autoTradingEnabled = false; log('error', 'Не удалось восстановить журнал сделок; автоторговля заблокирована', String(error)); }
+  catch (error) { tradeLedgerHealthy = false; tradingGate.setPaused(true); settings.autoTradingEnabled = false; log('error', 'Не удалось восстановить журнал сделок; автоторговля заблокирована', String(error)); }
   createMainWindow(); createTray();
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
