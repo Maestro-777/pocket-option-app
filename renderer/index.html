@@ -61,6 +61,17 @@
     </section>
     <section class="page" id="page-annotation">
       <div class="page-intro"><h2>Ручная разметка исторических ситуаций</h2><p>Выбери участок свечей, точку входа и направление. Каждый пример сохраняется независимо; для поиска используются только свечи до входа.</p></div>
+      <div class="panel-card analysis-monitor-config">
+        <div class="panel-head"><div><h3>Непрерывный анализ OTC-пар</h3><p>Работает независимо от паузы торговли. Анализирует новые закрытые свечи выбранных таймфреймов.</p></div><button class="btn primary" id="analysis-save">Сохранить параметры</button></div>
+        <div class="annotation-toolbar">
+          <label>Таймфреймы<select id="analysis-timeframes" multiple size="5"><option selected>S5</option><option selected>S10</option><option selected>S15</option><option selected>S30</option><option selected>M1</option><option selected>M2</option><option selected>M3</option><option selected>M5</option><option selected>M10</option><option selected>M15</option></select></label>
+          <label>Окно истории<input id="analysis-lookback" type="number" min="30" max="10000" value="300"></label>
+          <label>Интервал сканирования, мс<input id="analysis-interval" type="number" min="250" max="10000" value="1000"></label>
+          <label>Лимит кандидатов 1–10<input id="analysis-max-candidates" type="number" min="1" max="10" value="1"></label>
+        </div>
+        <div id="analysis-monitor-status" class="muted">Загрузка параметров непрерывного анализа…</div>
+      </div>
+      <div class="panel-card live-signals-panel"><div class="panel-head"><div><h3>Решения по новым свечам</h3><p>Положительные и отклонённые сигналы с причинами</p></div><button class="btn secondary" id="analysis-scan-now">Проверить сейчас</button></div><div id="live-signals" class="all-logs"><div class="empty">Ожидание новых закрытых свечей</div></div></div>
       <div class="annotation-toolbar panel-card">
         <label>OTC пара<select id="annotation-pair"><option value="">Загрузка активов…</option></select></label>
         <label>Таймфрейм<select id="annotation-timeframe"><option>S5</option><option>S10</option><option>S15</option><option>S30</option><option>M1</option><option>M2</option><option>M3</option><option>M5</option><option>M10</option><option>M15</option></select></label>
