@@ -177,7 +177,7 @@ async function injectMarketDataBridge(win) {
   try {
     if (!debuggerApi.isAttached()) debuggerApi.attach('1.3');
     const captureMode = !!(marketDataCapture && marketDataCapture.attached);
-    const source = (captureMode ? 'window.__PT_CAPTURE_MODE__ = true;\\n' : '') + fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
+    const source = (captureMode ? 'window.__PT_CAPTURE_MODE__ = true;\n' : '') + fs.readFileSync(path.join(__dirname, 'market-data-bridge.js'), 'utf8');
     await debuggerApi.sendCommand('Page.enable');
     await debuggerApi.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source });
     log('info', 'Перехват рыночных данных установлен до запуска скриптов сайта');
