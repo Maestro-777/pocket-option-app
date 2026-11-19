@@ -34,7 +34,7 @@ function validateCandle(candle, timeframe, label) {
   const startAt = Number(candle.startAt), endAt = Number(candle.endAt);
   const open = Number(candle.open), high = Number(candle.high), low = Number(candle.low), close = Number(candle.close);
   const duration = TIMEFRAME_MS[timeframe];
-  if (!Number.isSafeInteger(startAt) || !Number.isSafeInteger(endAt) || endAt !== startAt + duration || startAt % duration !== 0) {
+  if (!Number.isSafeInteger(startAt) || startAt <= 0 || !Number.isSafeInteger(endAt) || endAt !== startAt + duration || startAt % duration !== 0) {
     throw new TypeError(label + ': неверные временные границы свечи');
   }
   if (![open, high, low, close].every(v => Number.isFinite(v) && v > 0) ||
@@ -125,8 +125,10 @@ function analyzeSimilarity(input) {
     const normalized = validateCandle(candle, timeframe, 'Текущий график');
     if (normalized.endAt > entryAt) throw new TypeError('Будущая или незакрытая свеча попала в запрос анализа');
     if (candle.timeframe && String(candle.timeframe).toUpperCase() !== timeframe) throw new TypeError('Таймфрейм текущей свечи не совпадает с запросом');
-    return { ...normalized, complete: true };
+    if (typeof candle.asset !== 'string' || !candle.asset.toUpperCase().endsWith('_OTC')) throw new TypeError('Текущий график должен относиться к OTC-активу');
+    return { ...normalized, asset: candle.asset.toUpperCase(), complete: true };
   });
+  if (queryWindow.some(candle => candle.asset !== queryWindow[0].asset)) throw new TypeError('В запросе смешаны разные OTC-пары');
   for (let i = 1; i < queryWindow.length; i++) {
     if (queryWindow[i].startAt <= queryWindow[i - 1].startAt) throw new TypeError('Текущие свечи должны идти строго по времени');
   }
@@ -154,11 +156,15 @@ function analyzeSimilarity(input) {
       skipped++; continue;
     }
     if (!['UP', 'DOWN'].includes(String(example.direction || '').toUpperCase())) { skipped++; continue; }
+    const sampleAsset = String(example.asset || '').toUpperCase();
+    if (!sampleAsset.endsWith('_OTC')) { skipped++; continue; }
     if (!Array.isArray(example.inputCandles) || example.inputCandles.length < 3) { skipped++; continue; }
     try {
       const sample = example.inputCandles.slice(-options.lookback).map(candle => {
         const normalized = validateCandle(candle, timeframe, 'Исторический пример');
         if (normalized.endAt > Number(example.entryAt)) throw new TypeError('future leakage');
+        if (candle.asset && String(candle.asset).toUpperCase() !== sampleAsset) throw new TypeError('asset mismatch');
+        if (candle.timeframe && String(candle.timeframe).toUpperCase() !== timeframe) throw new TypeError('timeframe mismatch');
         return { ...normalized, complete: true };
       });
       for (let i = 1; i < sample.length; i++) if (sample[i].startAt <= sample[i - 1].startAt) throw new TypeError('unordered');
