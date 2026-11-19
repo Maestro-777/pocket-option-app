@@ -10,7 +10,16 @@ app.whenReady().then(async () => {
   let window;
   try {
     const store = new MarketDataStore(':memory:');
-    if (!store.integrityCheck() || store.getStats().schemaVersion !== 2) throw new Error('SQLite schema v2 did not initialize correctly');
+    if (!store.integrityCheck() || store.getStats().schemaVersion !== 3) throw new Error('SQLite schema v3 did not initialize correctly');
+    const now = Date.now();
+    store.createAnalysisDecision({
+      asset: 'EURUSD_OTC', timeframe: 'S5', decisionAt: now,
+      status: 'NO_SIGNAL', direction: null, reason: 'insufficient_similar_examples',
+      paramsSnapshot: { topK: 10, minSimilarity: 80 }, matches: [],
+      votes: { UP: 0, DOWN: 0 }, averageSimilarity: null,
+      queryCandles: [], algorithmVersion: 'shape-v1'
+    }, now);
+    if (store.listAnalysisDecisions({ limit: 1 }).length !== 1) throw new Error('SQLite decision journal did not persist');
     store.close();
 
     ipcMain.handle('app:market:assets', () => []);
@@ -26,7 +35,7 @@ app.whenReady().then(async () => {
     });
     await window.loadFile(path.join(__dirname, '..', 'renderer', 'labeler.html'));
     const rendererReady = await window.webContents.executeJavaScript(
-      "typeof window.pocketApp?.getMarketAssets === 'function' && typeof window.pocketApp?.createManualExample === 'function' && !!document.getElementById('chart')"
+      "typeof window.pocketApp?.getMarketAssets === 'function' && typeof window.pocketApp?.createManualExample === 'function' && typeof window.pocketApp?.analyzeSimilarity === 'function' && typeof window.pocketApp?.evaluateSimilarityBacktest === 'function' && typeof window.pocketApp?.getAnalysisDecisions === 'function' && !!document.getElementById('chart')"
     );
     if (!rendererReady) throw new Error('Manual labeling renderer or restricted preload API did not initialize');
     await window.webContents.executeJavaScript('window.pocketApp.getMarketAssets()');
