@@ -64,7 +64,8 @@ let settings = {
   similarityMinSimilarity: 80,
   similarityMinExamples: 3,
   similarityMinDirectionVotes: 6,
-  similarityLookback: 30
+  similarityLookback: 30,
+  analysisTimeframes: ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15']
 };
 
 const userRoot = () => app.getPath('userData');
@@ -393,6 +394,13 @@ ipcMain.handle('app:analysis-settings:save', (event, next) => {
   settings.similarityMinExamples = config.minExamples;
   settings.similarityMinDirectionVotes = config.minDirectionVotes;
   settings.similarityLookback = config.lookback;
+  if (next.analysisTimeframes != null) {
+    if (!Array.isArray(next.analysisTimeframes) || next.analysisTimeframes.length === 0) throw new TypeError('Выберите хотя бы один таймфрейм');
+    const allowed = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
+    const selected = [...new Set(next.analysisTimeframes.map(value => String(value).toUpperCase()))];
+    if (selected.some(value => !allowed.includes(value))) throw new TypeError('Выбран неподдерживаемый таймфрейм');
+    settings.analysisTimeframes = selected;
+  }
   saveSettings();
   log('info', 'Настройки поиска совпадений сохранены', {
     topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
@@ -400,7 +408,8 @@ ipcMain.handle('app:analysis-settings:save', (event, next) => {
   });
   return {
     topK: config.topK, minSimilarity: config.minSimilarity, minExamples: config.minExamples,
-    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback
+    minDirectionVotes: config.minDirectionVotes, lookback: config.lookback,
+    analysisTimeframes: [...settings.analysisTimeframes]
   };
 });
 ipcMain.handle('app:settings:get', () => settings);
