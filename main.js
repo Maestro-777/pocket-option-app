@@ -7,6 +7,8 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataHub } = require('./core/market-data');
+const { PocketOptionProtocol } = require('./core/pocketoption-protocol');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -37,6 +39,10 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+let marketDataHub = null;
+let marketProtocols = new Map();
+let marketCapture = { status: 'idle', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
+let marketStatusPublishTimer = null;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -137,6 +143,106 @@ function injectSiteBridge(win) {
     win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
   } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
 }
+function scheduleMarketStatusPublish() {
+  if (marketStatusPublishTimer) return;
+  marketStatusPublishTimer = setTimeout(() => {
+    marketStatusPublishTimer = null;
+    publishStatus();
+  }, 500);
+}
+
+function attachMarketDataCapture(win) {
+  const debuggerApi = win.webContents.debugger;
+  marketDataHub = new MarketDataHub();
+  marketProtocols = new Map();
+  marketCapture = { status: 'attaching', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
+
+  debuggerApi.on('message', (_event, method, params) => {
+    if (method === 'Network.webSocketCreated') {
+      const requestId = String(params?.requestId || '');
+      if (requestId && marketProtocols.size < 32 && !marketProtocols.has(requestId)) {
+        marketProtocols.set(requestId, new PocketOptionProtocol());
+      }
+      return;
+    }
+    if (method === 'Network.webSocketClosed') {
+      marketProtocols.delete(String(params?.requestId || ''));
+      scheduleMarketStatusPublish();
+      return;
+    }
+    if (method !== 'Network.webSocketFrameReceived') return;
+
+    const requestId = String(params?.requestId || '');
+    const frame = params?.response;
+    if (!requestId || !frame || typeof frame.payloadData !== 'string') return;
+    let decoder = marketProtocols.get(requestId);
+    if (!decoder) {
+      if (marketProtocols.size >= 32) return;
+      decoder = new PocketOptionProtocol();
+      marketProtocols.set(requestId, decoder);
+    }
+
+    marketCapture.lastFrameAt = Date.now();
+    const decoded = decoder.decodeFrame(frame.payloadData, frame.opcode === 2 ? 'base64' : 'utf8');
+    if (decoded?.ticks?.length) {
+      for (const tick of decoded.ticks) {
+        const result = marketDataHub.ingest(tick);
+        if (result.accepted) marketCapture.lastTickAt = tick.ts;
+      }
+      scheduleMarketStatusPublish();
+    }
+  });
+
+  debuggerApi.on('detach', (_event, reason) => {
+    marketProtocols.clear();
+    marketCapture = {
+      status: 'detached', attached: false, lastFrameAt: marketCapture.lastFrameAt,
+      lastTickAt: marketCapture.lastTickAt, lastError: String(reason || 'Debugger detached')
+    };
+    log('warn', 'Захват WebSocket Pocket Option остановлен', { reason: marketCapture.lastError });
+    scheduleMarketStatusPublish();
+  });
+
+  try {
+    if (debuggerApi.isAttached()) {
+      marketCapture = { ...marketCapture, status: 'unavailable', lastError: 'К этому окну уже подключён отладчик Chromium' };
+      log('warn', 'Не удалось включить сбор рыночных данных: Chromium debugger уже занят');
+      return;
+    }
+    debuggerApi.attach('1.3');
+    marketCapture.attached = true;
+    marketCapture.status = 'attached';
+    debuggerApi.sendCommand('Network.enable').then(() => {
+      if (!win.isDestroyed()) {
+        marketCapture.status = 'listening';
+        log('info', 'Захват WebSocket Pocket Option включён через Chromium DevTools Protocol');
+        scheduleMarketStatusPublish();
+      }
+    }).catch(error => {
+      marketCapture.status = 'error';
+      marketCapture.lastError = String(error);
+      log('error', 'Не удалось включить Network domain для рыночных данных', marketCapture.lastError);
+      scheduleMarketStatusPublish();
+    });
+  } catch (error) {
+    marketCapture.status = 'error';
+    marketCapture.lastError = String(error);
+    log('error', 'Не удалось подключить Chromium debugger для рыночных данных', marketCapture.lastError);
+  }
+}
+
+function getMarketDataStatus() {
+  const protocolStats = { textFrames: 0, binaryFrames: 0, malformedFrames: 0, events: 0, ticks: 0 };
+  for (const decoder of marketProtocols.values()) {
+    for (const key of Object.keys(protocolStats)) protocolStats[key] += decoder.stats[key];
+  }
+  return {
+    capture: { ...marketCapture, activeSockets: marketProtocols.size },
+    health: marketDataHub ? marketDataHub.getHealth() : { ok: false, assets: 0, series: 0, candlesInMemory: 0 },
+    protocol: protocolStats
+  };
+}
+
 function launchSite() {
   if (siteWindow && !siteWindow.isDestroyed()) {
     siteWindow.show(); siteWindow.focus(); refreshTrayMenu(); return;
@@ -152,6 +258,7 @@ function launchSite() {
     }
   });
   siteWindow.webContents.setBackgroundThrottling(false);
+  attachMarketDataCapture(siteWindow);
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
     injectSiteBridge(siteWindow); publishStatus();
@@ -170,7 +277,12 @@ function launchSite() {
   });
   siteWindow.on('show', () => { refreshTrayMenu(); publishStatus(); });
   siteWindow.on('hide', () => { refreshTrayMenu(); publishStatus(); });
-  siteWindow.on('closed', () => { siteWindow = null; refreshTrayMenu(); publishStatus(); });
+  siteWindow.on('closed', () => {
+    marketProtocols.clear();
+    marketDataHub = null;
+    marketCapture = { status: 'stopped', attached: false, lastFrameAt: null, lastTickAt: null, lastError: null };
+    siteWindow = null; refreshTrayMenu(); publishStatus();
+  });
   siteWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://') || url.startsWith('http://')) { shell.openExternal(url); }
     return { action: 'deny' };
@@ -197,6 +309,7 @@ function getPublicStatus() {
       updatedAt: lastBalance?.ts || null, stale: age == null || age > 15000
     },
     widgetVisible: !!(miniWindow && !miniWindow.isDestroyed() && miniWindow.isVisible()),
+    marketData: getMarketDataStatus(),
     reconnectAttempts, update: updateState
   };
 }
@@ -436,6 +549,7 @@ async function runFullCheck(source) {
 
 app.on('before-quit', () => {
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
+  if (marketStatusPublishTimer) clearTimeout(marketStatusPublishTimer);
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
 });
