@@ -59,3 +59,12 @@ test('restores persisted catalog rows and remembers explicit OTC suffixes', () =
   assert.equal(catalog.listOTC().length, 2);
   assert.equal(catalog.revision, 1);
 });
+
+test('explicit OTC suffix overrides a same-base regular catalog symbol', () => {
+  const catalog = new AssetCatalog();
+  catalog.ingest([{ symbol: 'EURUSD', name: 'EUR/USD' }]);
+  const resolved = catalog.resolve('EURUSD_otc');
+  assert.equal(resolved.isOTC, true);
+  assert.equal(resolved.asset, 'EURUSD_OTC');
+  assert.equal(resolved.source, 'explicit-otc-suffix');
+});
