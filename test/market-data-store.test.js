@@ -1,0 +1,108 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { MarketDataStore, validateCandle } = require('../core/market-data-store');
+
+function candle(overrides = {}) {
+  return { asset: 'EURUSD_OTC', timeframe: 'S5', startAt: 5000, endAt: 10000,
+    open: 1.1, high: 1.3, low: 1.0, close: 1.2, tickCount: 4, complete: true, ...overrides };
+}
+
+test('persists and returns candles in chronological order', () => {
+  const store = new MarketDataStore(':memory:');
+  store.upsertCandles([candle({ startAt: 10000, endAt: 15000 }), candle()]);
+  const rows = store.getCandles('eurusd_otc', 'S5');
+  assert.deepEqual(rows.map(row => row.startAt), [5000, 10000]);
+  assert.equal(rows[0].complete, true);
+  assert.equal(store.getStats().candles, 2);
+  store.close();
+});
+
+test('upserts corrections but prevents older snapshots from overwriting newer rows', () => {
+  const store = new MarketDataStore(':memory:');
+  store.upsertCandles([candle()], 2000);
+  store.upsertCandles([candle({ high: 1.5, close: 1.4 })], 3000);
+  store.upsertCandles([candle({ high: 1.35, close: 1.25 })], 2500);
+  const [row] = store.getCandles('EURUSD_OTC', 'S5');
+  assert.equal(row.high, 1.5);
+  assert.equal(row.close, 1.4);
+  store.close();
+});
+
+test('rejects incomplete candles and invalid OHLC before writing anything', () => {
+  const store = new MarketDataStore(':memory:');
+  assert.throws(() => store.upsertCandles([candle({ complete: false })]), /только закрытые/);
+  assert.throws(() => validateCandle(candle({ high: 0.9 })), /OHLC/);
+  assert.equal(store.getStats().candles, 0);
+  store.close();
+});
+
+test('stores and lists OTC catalog entries separately', () => {
+  const store = new MarketDataStore(':memory:');
+  store.upsertCatalog([
+    { asset: 'EURUSD_OTC', rawSymbol: 'EURUSD_otc', label: 'EUR/USD OTC', isOTC: true },
+    { asset: 'EURUSD', rawSymbol: 'EURUSD', label: 'EUR/USD', isOTC: false }
+  ]);
+  assert.deepEqual(store.listCatalog({ otcOnly: true }).map(row => row.asset), ['EURUSD_OTC']);
+  assert.equal(store.listCatalog().length, 2);
+  assert.equal(store.getStats().otcCatalogEntries, 1);
+  store.close();
+});
+
+test('filters by range and timeframe and validates query bounds', () => {
+  const store = new MarketDataStore(':memory:');
+  store.upsertCandles([
+    candle({ startAt: 5000, endAt: 10000 }), candle({ startAt: 10000, endAt: 15000 }),
+    candle({ asset: 'GBPUSD_OTC', startAt: 5000, endAt: 10000 }),
+    candle({ timeframe: 'M1', startAt: 60000, endAt: 120000 })
+  ]);
+  assert.deepEqual(store.getCandles('EURUSD_OTC', 'S5', { fromAt: 10000 }).map(row => row.startAt), [10000]);
+  assert.equal(store.getCandles('EURUSD_OTC', 'M1').length, 1);
+  assert.throws(() => store.getCandles('EURUSD_OTC', 'M4'), /таймфрейм/);
+  assert.throws(() => store.getCandles('EURUSD_OTC', 'S5', { fromAt: 20000, toAt: 10000 }), /fromAt/);
+  store.close();
+});
+
+test('persists data across database close and reopen', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'po-market-store-'));
+  const file = path.join(directory, 'market.sqlite');
+  try {
+    const first = new MarketDataStore(file); first.upsertCandles([candle()]); first.close();
+    const second = new MarketDataStore(file);
+    assert.equal(second.getCandles('EURUSD_OTC', 'S5').length, 1);
+    assert.equal(second.integrityCheck(), true);
+    second.close();
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('rejects unsupported future schema version', () => {
+  const { DatabaseSync } = require('node:sqlite');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'po-market-schema-'));
+  const file = path.join(directory, 'future.sqlite');
+  try {
+    const future = new DatabaseSync(file); future.exec('PRAGMA user_version = 99'); future.close();
+    assert.throws(() => new MarketDataStore(file), /более новой версией/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('close is idempotent and later reads fail clearly', () => {
+  const store = new MarketDataStore(':memory:'); store.close(); store.close();
+  assert.throws(() => store.getStats(), /уже закрыто/);
+});
+
+test('loads only recent OTC candles per series for recovery', () => {
+  const store = new MarketDataStore(':memory:');
+  store.upsertCatalog([{ asset: 'EURUSD_OTC', rawSymbol: 'EURUSD_otc', label: 'EUR/USD OTC', isOTC: true }]);
+  store.upsertCandles([
+    candle({ startAt: 5000, endAt: 10000 }), candle({ startAt: 10000, endAt: 15000 }),
+    candle({ startAt: 15000, endAt: 20000 }), candle({ asset: 'GBPUSD_OTC', startAt: 5000, endAt: 10000 })
+  ]);
+  const recent = store.getRecentCandles(2);
+  assert.equal(recent.filter(row => row.asset === 'EURUSD_OTC').length, 2);
+  assert.equal(recent.some(row => row.asset === 'GBPUSD_OTC'), true);
+  assert.deepEqual(recent.filter(row => row.asset === 'EURUSD_OTC').map(row => row.startAt), [10000, 15000]);
+  store.close();
+});
