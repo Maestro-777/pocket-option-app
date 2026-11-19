@@ -183,6 +183,7 @@ function findTradeButton(direction){
  return null;
 }
 window.__PT_CANCEL_TRADE_COMMAND__=tradeId=>{const id=String(tradeId||'');if(!id)return false;cancelledTradeCommands.add(id);return true;};
+window.__PT_CLEAR_TRADE_COMMAND__=tradeId=>cancelledTradeCommands.delete(String(tradeId||''));
 window.__PT_TRADE_COMMAND__=async request=>{
  const tradeId=String(request&&request.tradeId||'');
  try{
