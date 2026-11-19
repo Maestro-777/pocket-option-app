@@ -3,6 +3,9 @@ const {TIMEFRAME_MS,getTimeframeDuration}=require('./timeframes');
 const {DEFAULTS,normalizeConfig,analyzeSituation}=require('./matcher');
 const DEFAULT_TIMEFRAMES=Object.freeze(Object.keys(TIMEFRAME_MS));
 function normalizeSchedulerConfig(input={}){
+ if(!input||typeof input!=='object'||Array.isArray(input))throw new TypeError('Конфигурация анализа должна быть объектом');
+ if(input.enabled!=null&&typeof input.enabled!=='boolean')throw new TypeError('enabled должен быть boolean');
+ if(input.matcher!=null&&(!input.matcher||typeof input.matcher!=='object'||Array.isArray(input.matcher)))throw new TypeError('matcher должен быть объектом');
  const timeframes=Array.isArray(input.timeframes)?Array.from(new Set(input.timeframes.map(x=>String(x).toUpperCase()))):DEFAULT_TIMEFRAMES.slice();
  if(!timeframes.length||timeframes.some(tf=>!Object.prototype.hasOwnProperty.call(TIMEFRAME_MS,tf)))throw new RangeError('Выбери один или несколько поддерживаемых таймфреймов');
  const matcher=normalizeConfig(input.matcher||{});
@@ -56,7 +59,13 @@ class SignalScheduler{
      if(barEndAt>now+5000||now-barEndAt>freshness)continue;
      const candles=this.marketData.getCandles(asset,timeframe,{asOf:barEndAt,limit:config.lookback});
      scanned++;
-     if(candles.length<config.matcher.patternLength)continue;
+     if(candles.length<config.matcher.patternLength){
+      const signalId=asset+'|'+timeframe+'|'+barEndAt;
+      const decision={accepted:false,reason:'insufficient_market_data',timeframe,direction:null,matchCount:0,upVotes:0,downVotes:0,averageSimilarity:0,matches:[],settingsSnapshot:{...config.matcher},entryAt:barEndAt,analyzedAt:new Date().toISOString()};
+      const record={signalId,asset,timeframe,barEndAt,decision};decisions.push(record);
+      if(this.journal){const snapshot={...config.matcher,asset,timeframe,barEndAt,lookback:config.lookback,maxOpenTrades:config.maxOpenTrades,analysisTimeframes:config.timeframes.slice(),algorithmVersion:1};try{await this.journal.append('DECISION',record,snapshot);}catch(error){this.onError(error);}}
+      continue;
+     }
      let examples=exampleCache.get(timeframe);
      if(!examples){examples=await this.exampleStore.list({timeframe});exampleCache.set(timeframe,examples);}
      const decision=analyzeSituation({candles,timeframe,entryAt:barEndAt,examples,config:config.matcher});
@@ -66,15 +75,16 @@ class SignalScheduler{
      if(decision.accepted)candidates.push(record);
      if(this.journal){
       const snapshot={...decision.settingsSnapshot,asset,timeframe,barEndAt,lookback:config.lookback,maxOpenTrades:config.maxOpenTrades,analysisTimeframes:config.timeframes.slice(),algorithmVersion:1};
-      await this.journal.append('DECISION',{signalId,asset,timeframe,barEndAt,decision},snapshot);
+      try{await this.journal.append('DECISION',{signalId,asset,timeframe,barEndAt,decision},snapshot);}catch(error){this.onError(error);}
      }
     }
    }
    const ranked=rankCandidates(candidates);
-   const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId);
-   const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),topCandidateSignalIds:selected,at:new Date().toISOString()};
+   const selected=ranked.slice(0,config.maxOpenTrades).map(x=>x.signalId),rankedById=new Map(ranked.map(x=>[x.signalId,x]));
+   const allDecisions=decisions.map(item=>rankedById.get(item.signalId)||{...item,rank:null,withinConfiguredLimit:false});
+   const result={scanned,decisions:decisions.length,signals:ranked.map(x=>({...x,withinConfiguredLimit:selected.includes(x.signalId)})),allDecisions,topCandidateSignalIds:selected,at:new Date().toISOString()};
    this.lastScanAt=result.at;this.lastError=null;this.lastSummary={scanned,signals:ranked.length};
-   for(const item of result.signals)this.onDecision(item);
+   for(const item of allDecisions){try{this.onDecision(item);}catch(error){this.onError(error);}}
    return result;
   }finally{this.scanning=false;}
  }
