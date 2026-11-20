@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - 'feature/**'
 
 permissions:
   contents: read
@@ -27,5 +28,18 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check
 
+      - name: Run unit tests
+        run: npm test
+
       - name: Build Windows installer
         run: npm run dist
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pocket-Option-Background-win-x64
+          path: |
+            dist/*Setup*.exe
+            dist/*.blockmap
+          if-no-files-found: error
+          retention-days: 14

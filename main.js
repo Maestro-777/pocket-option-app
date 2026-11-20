@@ -7,6 +7,8 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
+const { MarketDataStore } = require('./core/market-data');
+const { isTrustedPocketOptionFrame, validateBalancePayload, validateMarketBatch } = require('./core/ipc-validation');
 
 const APP_NAME = 'Pocket Option Background';
 const ACCOUNT_URLS = {
@@ -30,6 +32,7 @@ let updateCheckTimeout = null;
 let appStartedAt = Date.now();
 let lastBalance = null;
 let lastSiteSignalAt = 0;
+let lastBalanceMessageAt = 0;
 let lastNetworkOk = null;
 let lastNetworkCheckAt = null;
 let reconnectAttempts = 0;
@@ -37,6 +40,10 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+const marketDataStore = new MarketDataStore();
+let marketBatchWindowAt = 0;
+let marketBatchCount = 0;
+let marketStatusPublishedAt = 0;
 let settings = {
   showMiniWidget: false,
   monitorIntervalMinutes: 5,
@@ -191,6 +198,7 @@ function getPublicStatus() {
       url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : null
     },
     network: { online: lastNetworkOk, checkedAt: lastNetworkCheckAt },
+    marketData: marketDataStore.getSnapshot(),
     account: {
       type: lastBalance?.accountType || selectedAccount.toLowerCase(),
       balance: lastBalance?.balance ?? null, currency: lastBalance?.currency || '',
@@ -255,9 +263,10 @@ ipcMain.handle('app:account:switch', async (_event, target) => {
     if (answer.response !== 1) return { ok: false, cancelled: true };
   }
   log('warn', 'Запрошено переключение счёта', { from: selectedAccount, to: mode });
+  const requestedAt = Date.now();
   try {
     await siteWindow.loadURL(ACCOUNT_URLS[mode]);
-    const confirmed = await waitForAccountMode(mode, 20000);
+    const confirmed = await waitForAccountMode(mode, 20000, requestedAt);
     if (!confirmed) {
       log('error', 'Pocket Option не подтвердил переключение счёта', { target: mode, url: siteWindow.webContents.getURL() });
       return { ok: false, reason: 'Сайт не подтвердил выбранный режим. Отображаемый счёт не изменён.' };
@@ -267,31 +276,67 @@ ipcMain.handle('app:account:switch', async (_event, target) => {
     publishStatus(); return { ok: true, mode };
   } catch (error) { log('error', 'Ошибка переключения счёта', String(error)); return { ok: false, reason: String(error) }; }
 });
-async function waitForAccountMode(mode, timeoutMs) {
+async function waitForAccountMode(mode, timeoutMs, afterTs = 0) {
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
     if (!siteWindow || siteWindow.isDestroyed()) return false;
     try {
       const result = await siteWindow.webContents.executeJavaScript('window.__PT_PO_STATUS__ || null', true);
-      if (result && result.accountType === mode.toLowerCase() && result.balance != null) return true;
+      const now = Date.now();
+      const statusTs = Number(result?.ts);
+      const fresh = Number.isFinite(statusTs) && statusTs >= afterTs && statusTs <= now + 2000 && now - statusTs <= 15000;
+      if (fresh && result.accountType === mode.toLowerCase() && Number.isFinite(result.balance) && result.balance >= 0) return true;
     } catch (_) {}
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   return false;
 }
 function isTrustedPocketOptionSender(event) {
-  if (!siteWindow || event.sender !== siteWindow.webContents) return false;
-  try { const host = new URL(siteWindow.webContents.getURL()).hostname; return host === 'pocketoption.com' || host.endsWith('.pocketoption.com'); }
-  catch (_) { return false; }
+  if (!siteWindow || siteWindow.isDestroyed()) return false;
+  return isTrustedPocketOptionFrame(event, siteWindow.webContents, siteWindow.webContents.getURL());
 }
 ipcMain.on('site:balance', (event, payload) => {
   if (!isTrustedPocketOptionSender(event)) return;
-  if (!payload || !['demo', 'real'].includes(payload.accountType) || !Number.isFinite(payload.balance) || payload.balance < 0) return;
-  if (payload.ts && payload.ts < (lastBalance?.ts || 0)) return;
-  lastBalance = { accountType: payload.accountType, balance: payload.balance, currency: String(payload.currency || ''), ts: Number(payload.ts) || Date.now() };
-  lastSiteSignalAt = Date.now(); selectedAccount = payload.accountType.toUpperCase(); publishStatus();
+  const now = Date.now();
+  const normalized = validateBalancePayload(payload, {
+    now, lastMessageAt: lastBalanceMessageAt, lastTimestamp: lastBalance?.ts
+  });
+  if (!normalized) return;
+  lastBalanceMessageAt = now;
+  lastBalance = normalized;
+  lastSiteSignalAt = now; selectedAccount = normalized.accountType.toUpperCase(); publishStatus();
 });
 ipcMain.on('site:log', (event, payload) => { if (!isTrustedPocketOptionSender(event)) return; log(payload?.level === 'error' ? 'error' : 'info', 'Pocket Option: ' + String(payload?.message || '')); });
+ipcMain.on('site:market-batch', (event, batch) => {
+  if (!isTrustedPocketOptionSender(event)) return;
+  const now = Date.now();
+  if (now - marketBatchWindowAt >= 1000) {
+    marketBatchWindowAt = now;
+    marketBatchCount = 0;
+  }
+  if (++marketBatchCount > 60) return;
+  const safeBatch = validateMarketBatch(batch, now);
+  if (!safeBatch.length) return;
+
+  let accepted = 0;
+  for (const item of safeBatch) {
+    const result = marketDataStore.ingest(item.eventName, item.payload, item.receivedAt);
+    if (result.accepted) accepted++;
+  }
+  if (accepted) {
+    const snapshot = marketDataStore.getSnapshot(now);
+    if (snapshot.acceptedTickCount && Math.floor(snapshot.acceptedTickCount / 250) !== Math.floor((snapshot.acceptedTickCount - accepted) / 250)) {
+      log('info', 'Получены рыночные данные Pocket Option', {
+        assets: snapshot.assetCount, catalogAssets: snapshot.catalogAssetCount,
+        ticks: snapshot.acceptedTickCount, lastEvent: snapshot.lastEventName
+      });
+    }
+    if (now - marketStatusPublishedAt >= 1000) {
+      marketStatusPublishedAt = now;
+      publishStatus();
+    }
+  }
+});
 ipcMain.handle('app:run-check', () => runFullCheck('manual'));
 ipcMain.handle('app:logs:read', () => {
   try { return fs.readFileSync(logFile(), 'utf8').split(/\r?\n/).filter(Boolean).slice(-1000).map(line => { try { return JSON.parse(line); } catch (_) { return { message: line }; } }); }

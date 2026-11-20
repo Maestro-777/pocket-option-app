@@ -47,6 +47,23 @@ function renderStatus(status) {
   $('side-status').textContent = status.site.running ? (status.account.stale ? 'Нет свежих данных' : 'Pocket Option подключён') : 'Сайт не запущен';
   $('side-dot').className = status.site.running && !status.account.stale ? 'online' : '';
   $('site-dot').className = status.site.running && !status.account.stale ? 'status-dot online' : 'status-dot';
+  const market = status.marketData || {};
+  const marketAssets = Array.isArray(market.assets) ? market.assets : [];
+  const marketFresh = market.lastTickAt != null && Date.now() - market.lastTickAt <= 30_000;
+  $('market-stream-state').textContent = marketFresh ? 'Поток активен' : market.catalogAssetCount ? 'Нет свежих тиков' : 'Нет данных';
+  $('market-data-summary').textContent = market.eventCount
+    ? 'Событий: ' + market.eventCount + ' · тиков: ' + market.acceptedTickCount +
+      ' · активов с потоком: ' + market.assetCount + ' · в каталоге: ' + market.catalogAssetCount +
+      (market.lastTickAt ? ' · последний тик: ' + Math.round(Math.max(0, Date.now() - market.lastTickAt) / 1000) + ' сек. назад' : '')
+    : 'Ожидание рыночных событий от Pocket Option';
+  $('market-assets').innerHTML = marketAssets.length
+    ? marketAssets.slice(0, 20).map(item =>
+      '<div class="check-row"><div><b>' + escapeHtml(item.asset) + '</b><br><small>' +
+      (item.isOtc ? 'OTC' : 'Инструмент') + ' · тиков: ' + Number(item.tickCount || 0) +
+      ' · последняя цена: ' + escapeHtml(item.lastPrice == null ? '—' : String(item.lastPrice)) +
+      '</small></div><b>' + (item.ageMs == null ? '—' : Math.round(item.ageMs / 1000) + ' сек.') + '</b></div>'
+    ).join('')
+    : '<div class="empty">Поток ещё не получен</div>';
   $('demo-btn').classList.toggle('active', status.account.type === 'demo');
   $('real-btn').classList.toggle('active', status.account.type === 'real');
   $('real-btn').classList.toggle('real', status.account.type === 'real');

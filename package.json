@@ -8,7 +8,7 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis",
     "pack": "electron-builder --dir --win",
-    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check modules/manager.js && node --check modules/example/index.js",
+    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check core/market-data.js && node --check core/ipc-validation.js && node --check test/market-data.test.js && node --check test/ipc-validation.test.js && node --check modules/manager.js && node --check modules/example/index.js",
     "test": "node --test"
   },
   "devDependencies": {
