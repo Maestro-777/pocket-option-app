@@ -34,6 +34,7 @@ function installMarketWebSocketTap() {
 
   function publish(eventName, payload) {
     if (!allowed.has(eventName) || payload == null) return;
+    if (eventName === 'updateAssets') rememberAssets(payload);
     try {
       const encoded = JSON.stringify(payload);
       if (!encoded || encoded.length > 256 * 1024) return;
@@ -80,9 +81,52 @@ function installMarketWebSocketTap() {
     }
   }
 
+  const rawAssets = new Map();
+  const normalizeAsset = value => {
+    let v = String(value || '').trim().toUpperCase();
+    const otc = /\\bOTC\\b|_OTC$/.test(v);
+    v = v.replace(/\\bOTC\\b/g, '').replace(/_OTC$/, '').replace(/[^A-Z0-9]/g, '');
+    return v ? v + (otc ? '_OTC' : '') : '';
+  };
+  function rememberAssets(payload) {
+    const rows = Array.isArray(payload) ? payload : (Array.isArray(payload?.assets) ? payload.assets : [payload]);
+    for (const row of rows.slice(0, 500)) {
+      const raw = Array.isArray(row) ? (row[1] || row[0]) :
+        row && typeof row === 'object' ? (row.rawSymbol || row.symbol || row.asset || row.code || row.s) : null;
+      if (typeof raw === 'string' && raw.length <= 64) {
+        const normalized = normalizeAsset(raw);
+        if (normalized) rawAssets.set(normalized, raw);
+      }
+    }
+  }
+  function requestHistory(data) {
+    const asset = normalizeAsset(data && data.asset);
+    const period = Number(data && data.period);
+    if (!asset || !asset.endsWith('_OTC') || !Number.isInteger(period) || period < 5 || period > 900) return false;
+    const sockets = window.__PT_ACTIVE_MARKET_SOCKETS__ || [];
+    const ws = sockets.slice().reverse().find(item => item && item.readyState === 1);
+    if (!ws) return false;
+    const raw = rawAssets.get(asset) || asset.replace(/_OTC$/, '_otc');
+    const now = Math.floor(Date.now() / 1000);
+    const offset = Math.max(period * 90, period <= 30 ? 9000 : 45000);
+    try { ws.send('42["changeSymbol",' + JSON.stringify({ asset: raw, period }) + ']'); } catch (_) {}
+    try {
+      ws.send('42["loadHistoryPeriod",' + JSON.stringify({ asset: raw, index: now, time: now, offset, period }) + ']');
+      return true;
+    } catch (_) { return false; }
+  }
+  window.addEventListener('message', event => {
+    if (event.source !== window || event.origin !== location.origin || !event.data || event.data.type !== 'PT_REQUEST_HISTORY') return;
+    const ok = requestHistory(event.data);
+    window.postMessage({ type: 'PT_HISTORY_REQUEST_RESULT', requestId: String(event.data.requestId || ''), ok }, location.origin);
+  });
+
   class MarketTapWebSocket extends NativeWebSocket {
     constructor(...args) {
       super(...args);
+      if (!Array.isArray(window.__PT_ACTIVE_MARKET_SOCKETS__)) window.__PT_ACTIVE_MARKET_SOCKETS__ = [];
+      window.__PT_ACTIVE_MARKET_SOCKETS__.push(this);
+      if (window.__PT_ACTIVE_MARKET_SOCKETS__.length > 8) window.__PT_ACTIVE_MARKET_SOCKETS__.shift();
       try { this.binaryType = 'arraybuffer'; } catch (_) {}
       this.addEventListener('message', event => {
         if (typeof event.data === 'string' || event.data instanceof ArrayBuffer) {
@@ -96,6 +140,15 @@ function installMarketWebSocketTap() {
   window.WebSocket = MarketTapWebSocket;
   return 'installed';
 }
+
+ipcRenderer.on('site:request-history', (_event, request) => {
+  if (!request || typeof request.asset !== 'string') return;
+  const asset = request.asset.slice(0, 64);
+  const period = Number(request.period);
+  if (!/^https:\\/\\/(?:[^/]+\\.)?pocketoption\\.com\\//i.test(location.href) ||
+      !/_OTC$/i.test(asset) || !Number.isInteger(period) || period < 5 || period > 900) return;
+  window.postMessage({ type: 'PT_REQUEST_HISTORY', asset, period, requestId: String(request.requestId || '').slice(0, 80) }, location.origin);
+});
 
 window.addEventListener('message', event => {
   if (event.source !== window || event.origin !== location.origin) return;
