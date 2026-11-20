@@ -25,5 +25,5 @@ test('ranks only into currently free execution slots after accounting for open a
  ticks.push(['EURUSD_OTC',currentBucket+1000,1.11],['GBPUSD_OTC',currentBucket+1000,1.11]);market.ingestTicks(ticks);
  const examples=Array.from({length:3},(_,i)=>({id:'slot-'+i,pair:'AUDUSD_OTC',timeframe:'S5',direction:'UP',entryAt:currentBucket,preEntryCandles:base}));
  const scheduler=new SignalScheduler({marketData:market,exampleStore:{list:async()=>examples},getOpenTradeCount:()=>1,getConfig:()=>({timeframes:['S5'],lookback:3,maxOpenTrades:2,matcher:{topK:3,similarityThreshold:99,minExamples:3,minDirectionalMatches:2,patternLength:3}})});
- const result=await scheduler.scan();assert.equal(result.signals.length,2);assert.equal(result.topCandidateSignalIds.length,1);assert.equal(result.signals.filter(x=>x.withinConfiguredLimit).length,1);assert.equal(scheduler.getStatus().lastSummary.availableSlots,1);
+ const result=await scheduler.scan();assert.equal(result.signals.length,2);assert.equal(result.topCandidateSignalIds.length,1);assert.equal(result.signals.filter(x=>x.withinConfiguredLimit).length,1);assert.equal(scheduler.getStatus().availableSlots,1);
 });
