@@ -272,7 +272,7 @@ function requireTrustedMainRenderer(event) {
 }
 ipcMain.handle('analysis:get-assets', event => {
   requireTrustedMainRenderer(event);
-  const observed = new Map(marketDataStore.getSnapshot().assets.map(item => [item.asset, item]));
+  const observed = new Map(marketDataStore.store.getSnapshot().assets.map(item => [item.asset, item]));
   const catalog = Array.from(marketDataStore.store.catalog.values()).filter(item => item.isOtc);
   const assets = new Map(catalog.map(item => [item.asset, { asset: item.asset, label: item.label, lastPrice: null, lastTickAt: null, ageMs: null }]));
   for (const item of observed.values()) if (item.isOtc) assets.set(item.asset, { ...assets.get(item.asset), ...item });
