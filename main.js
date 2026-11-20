@@ -40,6 +40,7 @@ let reloadHistory = [];
 let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
+let startupStage = 'module initialization';
 const marketDataStore = new MarketDataStore();
 let marketBatchWindowAt = 0;
 let marketBatchCount = 0;
@@ -65,7 +66,7 @@ function log(level, message, data) {
     fs.appendFileSync(logFile(), JSON.stringify(row) + os.EOL, 'utf8');
   } catch (error) { console.error('Log write failed', error); }
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app:log', row);
-  if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', getPublicStatus());
+  try { if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', getPublicStatus()); } catch (error) { console.error('Mini-window log notification failed', error); }
   console[level === 'error' ? 'error' : 'log']('[PO Background]', row);
 }
 function loadSettings() {
@@ -511,17 +512,49 @@ app.on('before-quit', () => {
 app.on('window-all-closed', () => { /* системный трей удерживает приложение открытым */ });
 app.on('activate', showMain);
 app.on('second-instance', showMain);
+process.on('uncaughtException', error => {
+  try { log('error', 'Необработанная ошибка главного процесса', error?.stack || String(error)); }
+  catch (loggingError) { console.error('Failed to record uncaught exception', loggingError, error); }
+});
+process.on('unhandledRejection', reason => {
+  try { log('error', 'Необработанный отказ Promise', reason?.stack || String(reason)); }
+  catch (loggingError) { console.error('Failed to record unhandled rejection', loggingError, reason); }
+});
+app.on('child-process-gone', (_event, details) => {
+  try { log('error', 'Завершился дочерний процесс Electron', details); } catch (error) { console.error(error); }
+});
+
 const lock = app.requestSingleInstanceLock();
-if (!lock) app.quit();
-else app.whenReady().then(async () => {
+if (!lock) {
+  console.error('[PO Background] Не удалось получить блокировку единственного экземпляра');
+  app.quit();
+} else app.whenReady().then(async () => {
+  startupStage = 'set-app-id';
   app.setAppUserModelId('com.maestro777.pocketoptionbackground');
-  loadSettings(); createMainWindow(); createTray();
+  log('info', 'Начало запуска', { version: app.getVersion(), packaged: app.isPackaged, electron: process.versions.electron, arch: process.arch, appPath: app.getAppPath() });
+  startupStage = 'load-settings';
+  loadSettings();
+  startupStage = 'create-main-window';
+  createMainWindow();
+  startupStage = 'create-tray';
+  createTray();
+  startupStage = 'load-modules';
   moduleManager = new ModuleManager({ directory: path.join(__dirname, 'modules'), context: { app, log }, log });
   await moduleManager.loadAll();
+  startupStage = 'create-mini-widget';
   if (settings.showMiniWidget) createMiniWindow().show();
-  healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', String(error))), HEALTH_INTERVAL);
-  fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  startupStage = 'start-monitoring-timers';
+  healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', error?.stack || String(error))), HEALTH_INTERVAL);
+  fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', error?.stack || String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
+  startupStage = 'startup-check';
   log('info', 'Приложение запущено; Pocket Option не открывается автоматически');
-  runFullCheck('startup').catch(error => log('error', 'Startup check failed', String(error)));
+  runFullCheck('startup').catch(error => log('error', 'Startup check failed', error?.stack || String(error)));
+  startupStage = 'configure-updates';
   configureUpdateChecks();
-}).catch(error => { console.error(error); app.quit(); });
+  startupStage = 'complete';
+}).catch(error => {
+  const details = { stage: startupStage, error: error?.stack || String(error) };
+  try { log('error', 'Критическая ошибка запуска приложения', details); }
+  catch (loggingError) { console.error('Failed to write startup error to application.log', loggingError, details); }
+  app.quit();
+});
