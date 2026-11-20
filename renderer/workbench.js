@@ -54,6 +54,16 @@
     selection={start,entry,end};editingId=id;$('wb-direction').value=ex.direction;$('wb-expiry').value=ex.expirySeconds;$('wb-outcome').value=ex.outcome;
     $('wb-editor-title').textContent='Редактирование ручного примера';$('wb-save').textContent='Сохранить изменения';$('wb-cancel').hidden=false;renderSelection();
   }
+  async function refreshJournal() {
+    const rows=await api.readDecisionJournal();
+    const decisions=rows.filter(row=>row.type==='DECISION').reverse();
+    $('wb-journal').innerHTML=decisions.map(row=>{
+      const p=row.payload||{}, accepted=p.accepted===true;
+      const matches=Array.isArray(p.matches)?p.matches:[];
+      return '<div class="check-row"><div><b>'+esc(p.asset||'—')+' · '+esc(p.timeframe||'—')+' · '+(accepted?esc(p.direction):'ОТКАЗ')+'</b><br><small>'+esc(row.at?stamp(row.at):'')+' · причина: '+esc(p.reason||'—')+' · совпадений: '+Number(p.matchCount||0)+' · UP '+Number(p.upVotes||0)+' / DOWN '+Number(p.downVotes||0)+'</small>'+
+        (matches.length?'<br><small>'+matches.map(m=>esc(m.sourcePair)+' '+esc(m.direction)+' '+Number(m.similarity).toFixed(1)+'% · '+esc(m.outcome)).join(' | ')+'</small>':'')+'</div><b>'+(accepted?'НАПРАВЛЕНИЕ':'НЕТ СИГНАЛА')+'</b></div>';
+    }).join('')||'<div class="empty">Записей решений пока нет</div>';
+  }
   async function analyze() {
     const asset=$('wb-asset').value;if(!asset)throw new Error('Выбери OTC-пару для анализа.');
     const config={topK:Number($('wb-topk').value),similarityThreshold:Number($('wb-threshold').value),minExamples:Number($('wb-min-examples').value),minDirectionalMatches:Number($('wb-votes').value),patternLength:Number($('wb-pattern').value)};
@@ -75,6 +85,7 @@
   $('wb-cancel').addEventListener('click',resetEditor);
   $('wb-analyze').addEventListener('click',()=>analyze().catch(e=>$('wb-analysis').textContent=e.message));
   $('wb-refresh').addEventListener('click',()=>refreshExamples().catch(e=>say(e.message)));
+  $('wb-journal-refresh').addEventListener('click',()=>refreshJournal().catch(e=>say(e.message)));
   $('wb-examples').addEventListener('click',async e=>{
     const edit=e.target.closest('[data-wb-edit]'),del=e.target.closest('[data-wb-delete]');
     try{if(edit)await editExample(edit.dataset.wbEdit);if(del){if(!confirm('Удалить ручной пример?'))return;await api.removeExample(del.dataset.wbDelete);await refreshExamples();}}catch(error){say(error.message);}
@@ -82,5 +93,5 @@
   $('wb-timeframe').addEventListener('change',()=>{selection={start:null,entry:null,end:null};refreshExamples().catch(e=>say(e.message));});
   document.querySelector('[data-page="workbench"]').addEventListener('click',()=>{loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));});
   api.onStatus?.(()=>{});
-  loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));
+  loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));refreshJournal().catch(e=>say(e.message));
 })();
