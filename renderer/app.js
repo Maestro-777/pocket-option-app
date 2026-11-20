@@ -119,7 +119,7 @@ async function refreshTradeSummary() {
       '</b><br><small>' + escapeHtml(t.timeframe) + ' · ' + t.amount + ' · ' + escapeHtml(t.outcome || '—') +
       ' · P/L ' + (t.profit == null ? '—' : Number(t.profit).toFixed(2)) + '</small></div></div>'
     ).join('');
-  $('trading-gate-state').textContent = 'Пауза шлюза: ' + (s.open ? 'есть неразрешённые сделки' : 'автоматическое исполнение выключено');
+  $('trading-gate-state').textContent = 'Шлюз: ' + (result.gate?.paused ? 'на паузе' : 'не на паузе') + ' · автоисполнение выключено';
 }
 
 function escapeHtml(value) {
