@@ -77,6 +77,51 @@ function renderStatus(status) {
     if (status.update.version) $('update-version').textContent = status.update.version;
   }
 }
+
+async function refreshMarketDiagnostics() {
+  const result = await api.getMarketDiagnostics();
+  $('market-diagnostic-summary').textContent = 'В каталоге OTC: ' + result.catalogOtc + ' · активны: ' + result.active + ' · устарели: ' + result.stale + ' · без тиков: ' + result.withoutTicks;
+  $('market-diagnostic-assets').innerHTML = result.assets.map(item =>
+    '<div class="check-row"><div><b>' + escapeHtml(item.asset) + '</b><br><small>' +
+    (item.state === 'active' ? 'Поток активен' : item.state === 'stale' ? 'Последний тик устарел' : 'Есть в каталоге, тиков не получено') +
+    ' · тиков: ' + item.tickCount + ' · цена: ' + escapeHtml(item.lastPrice == null ? '—' : String(item.lastPrice)) +
+    '</small></div><b>' + (item.ageMs == null ? '—' : Math.round(item.ageMs / 1000) + ' сек.') + '</b></div>'
+  ).join('') || '<div class="empty">Каталог OTC ещё не получен</div>';
+}
+async function refreshScheduler() {
+  const result = await api.getSchedulerStatus();
+  const s = result.scheduler || {};
+  $('scheduler-summary').textContent = (s.running ? 'Работает' : 'Остановлен') + ' · сканирований инструмент/таймфрейм: ' + (s.scanned || 0) +
+    ' · кандидатов: ' + (s.signals || 0) + ' · обработанных свечей: ' + (s.trackedBars || 0) +
+    (s.lastScanAt ? ' · последнее сканирование: ' + new Date(s.lastScanAt).toLocaleString('ru-RU') : '') +
+    (s.lastError ? ' · ошибка: ' + s.lastError : '');
+  $('scheduler-decisions').innerHTML = result.recent.map(item => {
+    const d = item.decision || {};
+    return '<div class="check-row"><div><b>' + escapeHtml(item.asset || '—') + ' · ' + escapeHtml(item.timeframe || '—') +
+      ' · ' + (d.accepted ? escapeHtml(d.direction) : 'Нет сигнала') + '</b><br><small>' +
+      escapeHtml(d.reason || '—') + ' · совпадений: ' + Number(d.matchCount || 0) +
+      ' · UP ' + Number(d.upVotes || 0) + ' / DOWN ' + Number(d.downVotes || 0) +
+      ' · сходство: ' + Number(d.averageSimilarity || 0).toFixed(1) + '%</small></div>' +
+      '<b>' + (item.withinConfiguredLimit ? 'В лимите' : d.accepted ? 'Кандидат' : 'Отказ') + '</b></div>';
+  }).join('') || '<div class="empty">Решений пока нет — дождись закрытия новых свечей</div>';
+}
+async function refreshTradeSummary() {
+  const result = await api.getTradeSummary(), s = result.status || {}, stats = s.stats || {};
+  $('trade-summary').textContent = 'Закрыто: ' + (stats.total || 0) + ' · побед: ' + (stats.wins || 0) +
+    ' · поражений: ' + (stats.losses || 0) + ' · ничьих: ' + (stats.draws || 0) +
+    ' · win rate: ' + Number(stats.winRate || 0).toFixed(1) + '% · чистый P/L: ' + Number(stats.netProfit || 0).toFixed(2) +
+    ' · открытых/неразрешённых: ' + (s.open || 0) + ' · несопоставленных закрытий: ' + (s.unmatchedCloseEvents || 0);
+  const groups = [['По OTC-паре', stats.byPair], ['По таймфрейму', stats.byTimeframe], ['По направлению', stats.byDirection], ['По экспирации', stats.byExpiry], ['По сходству', stats.bySimilarity]];
+  $('trade-breakdown').innerHTML = groups.map(([title, rows]) => '<div class="check-row"><div><b>' + title + '</b><br><small>' +
+    (Array.isArray(rows) && rows.length ? rows.map(x => escapeHtml(x.key) + ': ' + x.total + ' / P&L ' + Number(x.netProfit).toFixed(2) + ' / win ' + Number(x.winRate).toFixed(1) + '%').join(' · ') : 'Нет закрытых данных') +
+    '</small></div></div>').join('') + (result.trades || []).slice(0, 30).map(t =>
+      '<div class="check-row"><div><b>' + escapeHtml(t.pair) + ' · ' + escapeHtml(t.direction) + ' · ' + escapeHtml(t.status) +
+      '</b><br><small>' + escapeHtml(t.timeframe) + ' · ' + t.amount + ' · ' + escapeHtml(t.outcome || '—') +
+      ' · P/L ' + (t.profit == null ? '—' : Number(t.profit).toFixed(2)) + '</small></div></div>'
+    ).join('');
+  $('trading-gate-state').textContent = 'Пауза шлюза: ' + (s.open ? 'есть неразрешённые сделки' : 'автоматическое исполнение выключено');
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 }
@@ -129,6 +174,10 @@ $('demo-btn').addEventListener('click', () => switchMode('DEMO'));
 $('real-btn').addEventListener('click', () => switchMode('REAL'));
 $('refresh-btn').addEventListener('click', async () => renderStatus(await api.getStatus()));
 $('run-check').addEventListener('click', async () => renderCheck(await api.runCheck()));
+$('refresh-market-diagnostics').addEventListener('click', () => refreshMarketDiagnostics().catch(e => toast(e.message)));
+$('refresh-scheduler').addEventListener('click', () => refreshScheduler().catch(e => toast(e.message)));
+$('refresh-trades').addEventListener('click', () => refreshTradeSummary().catch(e => toast(e.message)));
+$('toggle-trading-pause').addEventListener('click', async () => { await api.setTradingPaused(true); toast('Шлюз оставлен на паузе; автоисполнение выключено'); refreshTradeSummary(); });
 $('widget-state').parentElement.addEventListener('click', () => api.toggleWidget());
 $('save-settings').addEventListener('click', async () => {
   const value = {
@@ -160,4 +209,7 @@ api.onLog(addLog);
 api.onCheckResult(renderCheck);
 Promise.all([api.getStatus(), api.readLogs()]).then(([status, history]) => {
   renderStatus(status); logs = history || []; renderRecent();
+  refreshMarketDiagnostics().catch(error => toast(error.message));
+  refreshScheduler().catch(error => toast(error.message));
+  refreshTradeSummary().catch(error => toast(error.message));
 }).catch(error => toast('Не удалось загрузить состояние: ' + error.message));
