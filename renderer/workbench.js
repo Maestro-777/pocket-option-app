@@ -34,7 +34,11 @@
   async function loadCandles() {
     const asset=$('wb-asset').value, timeframe=$('wb-timeframe').value, limit=Number($('wb-limit').value);
     if(!asset)throw new Error('Сначала выбери OTC-пару.');
+    say('Запрашиваю исторические свечи у Pocket Option…');
+    const history=await api.requestAnalysisHistory({asset,timeframe});
     candles=await api.getAnalysisCandles({asset,timeframe,limit});
+    if(!candles.length)throw new Error(history.reason || 'История свечей пока не получена. Проверь, что Pocket Option загружен и выбранная OTC-пара доступна.');
+
     selection={start:null,entry:null,end:null};renderSelection();
     say('Загружено закрытых свечей: '+candles.length+'. Таймфрейм '+timeframe+'.');
     await refreshExamples();
