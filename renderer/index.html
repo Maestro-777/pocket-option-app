@@ -76,7 +76,15 @@
         <div class="muted" id="wb-save-status"></div>
       </article>
       <article class="panel-card" style="margin-top:14px">
-        <div class="panel-head"><div><h3>Поиск похожих ситуаций</h3><p>Сходство свечей — не вероятность выигрыша. Начальные параметры: topK 10, порог 80%, минимум 6 голосов.</p></div><button class="btn primary" id="wb-analyze">Анализировать сейчас</button></div>
+        <div class="panel-head"><div><h3>Поиск похожих ситуаций</h3><p>Сходство свечей — не вероятность выигрыша. Сравнение только в выбранном таймфрейме.</p></div><button class="btn primary" id="wb-analyze">Анализировать сейчас</button></div>
+        <div class="log-toolbar">
+          <label>Top K <input id="wb-topk" type="number" min="1" max="100" value="10"></label>
+          <label>Сходство, % <input id="wb-threshold" type="number" min="0" max="100" step="0.5" value="80"></label>
+          <label>Мин. примеров <input id="wb-min-examples" type="number" min="1" max="100" value="3"></label>
+          <label>Голосов направления <input id="wb-votes" type="number" min="1" max="100" value="6"></label>
+          <label>Длина паттерна <input id="wb-pattern" type="number" min="2" max="500" value="30"></label>
+        </div>
+        <div class="muted">Параметры применяются к следующему запуску анализа. Top K ограничивает число совпадений; число голосов должно быть не больше Top K.</div>
         <div id="wb-analysis" class="check-summary">Анализ ещё не запускался</div>
       </article>
       <article class="panel-card" style="margin-top:14px">
