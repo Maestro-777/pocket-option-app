@@ -145,7 +145,7 @@ ipcRenderer.on('site:request-history', (_event, request) => {
   if (!request || typeof request.asset !== 'string') return;
   const asset = request.asset.slice(0, 64);
   const period = Number(request.period);
-  if (!/^https:\\/\\/(?:[^/]+\\.)?pocketoption\\.com\\//i.test(location.href) ||
+  if (!['pocketoption.com'].some(host => location.hostname === host || location.hostname.endsWith('.' + host)) ||
       !/_OTC$/i.test(asset) || !Number.isInteger(period) || period < 5 || period > 900) return;
   window.postMessage({ type: 'PT_REQUEST_HISTORY', asset, period, requestId: String(request.requestId || '').slice(0, 80) }, location.origin);
 });
