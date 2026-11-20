@@ -688,7 +688,7 @@ if (!lock) {
   scanStateStore = new ScanStateStore(path.join(dataDirectory, 'scan-state.json'));
   tradeLedger = new TradeLedger(path.join(dataDirectory, 'trade-ledger.json'));
   await tradeLedger.load();
-  tradingGate = new TradingGate();
+  tradingGate = new TradingGate({ paused: true });
   tradeExecution = new TradeExecutionAdapter({
     gate: tradingGate, marketData: marketDataStore, journal: decisionJournal, ledger: tradeLedger,
     getSettings: () => ({ ...settings, autoTradingEnabled: false }),
