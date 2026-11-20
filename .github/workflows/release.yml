@@ -1,6 +1,7 @@
 name: Build and publish Windows release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -27,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $packageVersion = node -p "require('./package.json').version"
-          if ($env:GITHUB_REF_NAME -ne "v$packageVersion") {
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -ne "v$packageVersion") {
             throw "Release tag $env:GITHUB_REF_NAME does not match package.json version v$packageVersion"
           }
 
