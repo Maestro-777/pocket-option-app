@@ -2,7 +2,7 @@
 const api = window.pocketApp;
 const $ = id => document.getElementById(id);
 let logs = [];
-const pages = { home: 'Главная', monitor: 'Мониторинг', logs: 'Журналы', settings: 'Настройки', updates: 'Обновления' };
+const pages = { home: 'Главная', workbench: 'Примеры и анализ', monitor: 'Мониторинг', logs: 'Журналы', settings: 'Настройки', updates: 'Обновления' };
 function toast(message) {
   const el = $('toast'); el.textContent = message; el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2600);
