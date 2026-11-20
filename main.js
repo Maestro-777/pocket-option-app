@@ -317,7 +317,7 @@ ipcMain.handle('analysis:run', async (event, request = {}) => {
   getTimeframeDuration(timeframe);
   if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
   const config = normalizeConfig(request.config || settings.analysisConfig || {});
-  const candles = marketDataStore.getAggregatedCandles(asset, timeframe, { asOf: Date.now() })
+  const candles = marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit: 2000 })
     .filter(candle => candle.complete).slice(-Math.max(config.patternLength, Math.min(2000, Number(request.lookback) || 300)));
   const examples = await exampleStore.list({ timeframe });
   const entryAt = candles.length ? candles[candles.length - 1].endAt : Date.now();
@@ -329,6 +329,25 @@ ipcMain.handle('analysis:run', async (event, request = {}) => {
     matches: decision.matches
   }, decision.settingsSnapshot);
   return { decision, candleCount: candles.length, exampleCount: examples.length };
+});
+
+ipcMain.handle('market:diagnostics', event => {
+  requireTrustedMainRenderer(event);
+  const snapshot = marketDataStore.store.getSnapshot();
+  const observed = new Map(snapshot.assets.map(item => [item.asset, item]));
+  const assets = Array.from(marketDataStore.store.catalog.values())
+    .filter(item => item.isOtc)
+    .map(item => {
+      const live = observed.get(item.asset);
+      return { asset: item.asset, label: item.label, lastPrice: live?.lastPrice ?? null,
+        lastTickAt: live?.lastTickAt ?? null, ageMs: live?.ageMs ?? null,
+        tickCount: live?.tickCount ?? 0, state: !live ? 'catalog-only' : live.ageMs > 30000 ? 'stale' : 'active' };
+    }).sort((a,b) => a.asset.localeCompare(b.asset));
+  return { at: Date.now(), catalogOtc: assets.length,
+    active: assets.filter(x => x.state === 'active').length,
+    stale: assets.filter(x => x.state === 'stale').length,
+    withoutTicks: assets.filter(x => x.state === 'catalog-only').length,
+    assets, market: snapshot };
 });
 
 ipcMain.handle('analysis:scheduler-status', event => {
@@ -472,7 +491,7 @@ ipcMain.on('site:market-batch', (event, batch) => {
     if (result.accepted) accepted++;
   }
   if (accepted) {
-    const snapshot = marketDataStore.getSnapshot(now);
+    const snapshot = marketDataStore.store.getSnapshot(now);
     if (snapshot.acceptedTickCount && Math.floor(snapshot.acceptedTickCount / 250) !== Math.floor((snapshot.acceptedTickCount - accepted) / 250)) {
       log('info', 'Получены рыночные данные Pocket Option', {
         assets: snapshot.assetCount, catalogAssets: snapshot.catalogAssetCount,
