@@ -10,8 +10,20 @@
   function selectionText(key) { const i=selection[key]; return i==null || !candles[i] ? '—' : stamp(candles[i].startAt); }
   function renderSelection() {
     $('wb-start').textContent=selectionText('start'); $('wb-entry').textContent=selectionText('entry'); $('wb-end').textContent=selection.end==null||!candles[selection.end]?'—':stamp(candles[selection.end].endAt);
-    $('wb-candles').innerHTML=candles.map((c,i)=>'<button class="log-entry" data-wb-index="'+i+'" style="width:100%;text-align:left;background:'+
-      (Object.values(selection).includes(i)?'#203a5c':'transparent')+';border:0;color:inherit;cursor:pointer"><time>'+esc(stamp(c.startAt))+'</time><b>O '+c.open+'</b><b>H '+c.high+'</b><b>L '+c.low+'</b><b>C '+c.close+'</b><small>'+(c.complete?'закрыта':'формируется')+'</small></button>').join('')||'<div class="empty">Нет закрытых свечей для отображения</div>';
+    if(!candles.length){$('wb-candles').innerHTML='<div class="empty">Нет закрытых свечей для отображения</div>';return;}
+    const width=Math.max(1000,candles.length*6),height=230,pad=12;
+    const lows=candles.map(x=>Number(x.low)),highs=candles.map(x=>Number(x.high));
+    const min=Math.min(...lows),max=Math.max(...highs),range=max-min||1;
+    const y=value=>height-pad-(Number(value)-min)/range*(height-pad*2);
+    const markers={start:'#60a5fa',entry:'#facc15',end:'#c084fc'};
+    const bars=candles.map((bar,i)=>{
+      const x=pad+i*6+2,open=y(bar.open),close=y(bar.close),top=Math.min(open,close),body=Math.max(1,Math.abs(close-open));
+      const selected=Object.keys(selection).filter(k=>selection[k]===i);
+      const fill=selected.length?markers[selected[0]]:(bar.close>=bar.open?'#22c55e':'#ef4444');
+      const marker=selected.length?'<text x="'+x+'" y="10" text-anchor="middle" fill="'+fill+'" font-size="9">'+selected.map(k=>k[0].toUpperCase()).join('/')+'</text>':'';
+      return '<g data-wb-index="'+i+'" style="cursor:pointer">'+marker+'<line x1="'+x+'" x2="'+x+'" y1="'+y(bar.high)+'" y2="'+y(bar.low)+'" stroke="'+fill+'" stroke-width="1"/><rect x="'+(x-1.5)+'" y="'+top+'" width="3" height="'+body+'" fill="'+fill+'"><title>'+esc(stamp(bar.startAt))+' O '+bar.open+' H '+bar.high+' L '+bar.low+' C '+bar.close+'</title></rect></g>';
+    }).join('');
+    $('wb-candles').innerHTML='<div style="overflow-x:auto;max-width:100%"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+width+' '+height+'" width="'+width+'" height="'+height+'" role="img" aria-label="График японских свечей; нажми на свечу для отметки"><line x1="0" x2="'+width+'" y1="'+(height/2)+'" y2="'+(height/2)+'" stroke="#64748b" stroke-opacity=".25"/>'+bars+'</svg></div><small>Нажми на свечу, чтобы поставить текущую отметку. Синий — начало, жёлтый — вход, фиолетовый — конец.</small>';
   }
   async function loadAssets() {
     const rows=await api.getAnalysisAssets(),select=$('wb-asset'),previous=select.value;
