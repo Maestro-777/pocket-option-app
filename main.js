@@ -292,6 +292,31 @@ ipcMain.handle('analysis:get-assets', event => {
   for (const item of observed.values()) if (item.isOtc) assets.set(item.asset, { ...assets.get(item.asset), ...item });
   return Array.from(assets.values()).sort((a, b) => a.asset.localeCompare(b.asset));
 });
+ipcMain.handle('analysis:request-history', async (event, request = {}) => {
+  requireTrustedMainRenderer(event);
+  const asset = String(request.asset || '').trim().toUpperCase();
+  const timeframe = String(request.timeframe || '').toUpperCase();
+  const duration = getTimeframeDuration(timeframe);
+  if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
+  if (!siteWindow || siteWindow.isDestroyed() || siteWindow.webContents.isLoading()) {
+    throw new Error('Сначала дождись полной загрузки Pocket Option');
+  }
+  const period = Math.round(duration / 1000);
+  const requestId = 'history-' + Date.now();
+  siteWindow.webContents.send('site:request-history', { asset, period, requestId });
+  log('info', 'Запрошена история свечей Pocket Option', { asset, timeframe, period });
+  const deadline = Date.now() + 15000;
+  let candles = [];
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+    if (!siteWindow || siteWindow.isDestroyed()) break;
+    candles = marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit: 2000 })
+      .filter(candle => candle.complete);
+    if (candles.length) return { ok: true, count: candles.length };
+  }
+  return { ok: false, count: candles.length, reason: 'Pocket Option не вернул историю. Проверь выбранную OTC-пару и соединение.' };
+});
+
 ipcMain.handle('analysis:get-candles', (event, request = {}) => {
   requireTrustedMainRenderer(event);
   const asset = String(request.asset || '').trim().toUpperCase();
