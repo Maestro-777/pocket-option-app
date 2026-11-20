@@ -64,6 +64,14 @@
         (matches.length?'<br><small>'+matches.map(m=>esc(m.sourcePair)+' '+esc(m.direction)+' '+Number(m.similarity).toFixed(1)+'% · '+esc(m.outcome)).join(' | ')+'</small>':'')+'</div><b>'+(accepted?'НАПРАВЛЕНИЕ':'НЕТ СИГНАЛА')+'</b></div>';
     }).join('')||'<div class="empty">Записей решений пока нет</div>';
   }
+  async function loadAnalysisSettings() {
+    const config=await api.getAnalysisSettings();
+    $('wb-topk').value=config.topK;
+    $('wb-threshold').value=config.similarityThreshold;
+    $('wb-min-examples').value=config.minExamples;
+    $('wb-votes').value=config.minDirectionalMatches;
+    $('wb-pattern').value=config.patternLength;
+  }
   async function analyze() {
     const asset=$('wb-asset').value;if(!asset)throw new Error('Выбери OTC-пару для анализа.');
     const config={topK:Number($('wb-topk').value),similarityThreshold:Number($('wb-threshold').value),minExamples:Number($('wb-min-examples').value),minDirectionalMatches:Number($('wb-votes').value),patternLength:Number($('wb-pattern').value)};
@@ -72,6 +80,7 @@
     if(!Number.isInteger(config.minExamples)||config.minExamples<1||config.minExamples>config.topK)throw new Error('Минимум примеров должен быть от 1 до Top K.');
     if(!Number.isInteger(config.minDirectionalMatches)||config.minDirectionalMatches<1||config.minDirectionalMatches>config.topK)throw new Error('Число подтверждений должно быть от 1 до Top K.');
     if(!Number.isInteger(config.patternLength)||config.patternLength<2||config.patternLength>500)throw new Error('Длина паттерна должна быть от 2 до 500.');
+    await api.saveAnalysisSettings(config);
     const result=await api.analyzeSituation({asset,timeframe:$('wb-timeframe').value,lookback:Number($('wb-limit').value),config});
     const d=result.decision;
     $('wb-analysis').innerHTML='<b>'+(d.accepted?'Подтверждённое направление: '+esc(d.direction):'Сигнал не подтверждён')+'</b><br>Причина: '+esc(d.reason)+'<br>Совпадений: '+d.matchCount+' · UP: '+d.upVotes+' · DOWN: '+d.downVotes+'<br>Среднее сходство: '+d.averageSimilarity.toFixed(2)+'%<br><small>'+esc(d.disclaimer)+'</small>'+
@@ -93,5 +102,5 @@
   $('wb-timeframe').addEventListener('change',()=>{selection={start:null,entry:null,end:null};refreshExamples().catch(e=>say(e.message));});
   document.querySelector('[data-page="workbench"]').addEventListener('click',()=>{loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));});
   api.onStatus?.(()=>{});
-  loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));refreshJournal().catch(e=>say(e.message));
+  loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));refreshJournal().catch(e=>say(e.message));loadAnalysisSettings().catch(e=>say(e.message));
 })();
