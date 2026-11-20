@@ -57,7 +57,8 @@ let settings = {
   reconnectAttemptsBeforeReload: 3,
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
-  autoCheckUpdates: true
+  autoCheckUpdates: true,
+  analysisConfig: { topK: 10, similarityThreshold: 80, minExamples: 3, minDirectionalMatches: 6, patternLength: 30 }
 };
 
 const userRoot = () => app.getPath('userData');
@@ -300,7 +301,7 @@ ipcMain.handle('analysis:run', async (event, request = {}) => {
   const timeframe = String(request.timeframe || '').toUpperCase();
   getTimeframeDuration(timeframe);
   if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
-  const config = normalizeConfig(request.config || {});
+  const config = normalizeConfig(request.config || settings.analysisConfig || {});
   const candles = marketDataStore.getAggregatedCandles(asset, timeframe, { asOf: Date.now() })
     .filter(candle => candle.complete).slice(-Math.max(config.patternLength, Math.min(2000, Number(request.lookback) || 300)));
   const examples = await exampleStore.list({ timeframe });
@@ -335,6 +336,17 @@ ipcMain.handle('app:reload-site', async () => {
 });
 ipcMain.handle('app:toggle-widget', () => { toggleWidget(); return { ok: true }; });
 ipcMain.handle('app:settings:get', () => settings);
+ipcMain.handle('analysis:settings:get', event => {
+  requireTrustedMainRenderer(event);
+  return normalizeConfig(settings.analysisConfig || {});
+});
+ipcMain.handle('analysis:settings:save', (event, input = {}) => {
+  requireTrustedMainRenderer(event);
+  const config = normalizeConfig(input);
+  settings.analysisConfig = { ...config };
+  saveSettings();
+  return settings.analysisConfig;
+});
 ipcMain.handle('app:settings:save', (_event, next) => {
   if (!next || typeof next !== 'object') return settings;
   if (typeof next.showMiniWidget === 'boolean') settings.showMiniWidget = next.showMiniWidget;
