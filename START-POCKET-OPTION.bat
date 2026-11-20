@@ -1,24 +1,47 @@
 @echo off
 setlocal
 title Pocket Option Background - Update and Launch
-cd /d "%~dp0"
 
 echo.
 echo ================================================
 echo   Pocket Option Background
-echo   Update source code and launch
+echo   Download, update and launch
 echo ================================================
 echo.
 
-if not exist ".git" (
-  echo [ERROR] Git repository not found in this folder.
-  echo Clone first: https://github.com/Maestro-777/pocket-option-app
+where git >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Git for Windows is required. Install Git, then run this file again.
   goto :failed
 )
 
-where git >nul 2>&1
+rem If this BAT is already inside the cloned repository, use that folder.
+if exist "%~dp0.git" (
+  set "PROJECT_DIR=%~dp0"
+  goto :project_ready
+)
+
+rem Otherwise keep the repository in a subfolder next to this BAT.
+set "PROJECT_DIR=%~dp0pocket-option-app"
+
+if not exist "%PROJECT_DIR%\.git" (
+  if exist "%PROJECT_DIR%" (
+    echo [ERROR] The folder "%PROJECT_DIR%" exists but is not a Git repository.
+    echo Rename or remove that folder, then run this file again.
+    goto :failed
+  )
+  echo [1/5] Downloading the application source code...
+  git clone https://github.com/Maestro-777/pocket-option-app "%PROJECT_DIR%"
+  if errorlevel 1 (
+    echo [ERROR] Could not download the repository. Check your internet connection.
+    goto :failed
+  )
+)
+
+:project_ready
+cd /d "%PROJECT_DIR%"
 if errorlevel 1 (
-  echo [ERROR] Git for Windows is not installed or not in PATH.
+  echo [ERROR] Could not open the project folder.
   goto :failed
 )
 
@@ -41,18 +64,15 @@ if errorlevel 1 (
   goto :failed
 )
 
-echo [1/4] Updating source code from origin/main...
+echo [2/5] Updating source code...
 git pull --ff-only origin main
 if errorlevel 1 (
-  echo.
-  echo [ERROR] Could not update source code.
-  echo Check your internet connection and local changes.
-  echo Local changes are not overwritten.
+  echo [ERROR] Could not update source code. Check internet and local changes.
   goto :failed
 )
 
 echo.
-echo [2/4] Installing dependencies...
+echo [3/5] Installing dependencies...
 call npm install
 if errorlevel 1 (
   echo [ERROR] npm install failed.
@@ -60,7 +80,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [3/4] Checking source code...
+echo [4/5] Checking source code...
 call npm run check
 if errorlevel 1 (
   echo [ERROR] Source checks failed. Launch cancelled.
@@ -68,7 +88,7 @@ if errorlevel 1 (
 )
 
 echo.
-echo [4/4] Launching application...
+echo [5/5] Launching application...
 call npm start
 set "APP_EXIT=%ERRORLEVEL%"
 
