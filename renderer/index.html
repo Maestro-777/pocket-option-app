@@ -100,9 +100,22 @@
       <div class="page-intro"><h2>Мониторинг устойчивости</h2><p>Полная проверка выполняется автоматически каждые 5 минут. Проверка сети и восстановления — чаще.</p><button class="btn primary" id="run-check">Запустить проверку сейчас</button></div>
       <div id="check-summary" class="check-summary">Ожидание первой проверки</div><div id="check-list" class="check-list"></div>
       <article class="panel-card">
-        <div class="panel-head"><div><h3>Рыночный поток · прототип</h3><p>Наблюдение за разрешёнными WebSocket-событиями. Торговые команды не отправляются.</p></div><span class="pill" id="market-stream-state">Нет данных</span></div>
+        <div class="panel-head"><div><h3>Планировщик анализа</h3><p>Автоматически проверяет доступные OTC-пары и новые закрытые свечи. Кандидаты не превращаются в сделки.</p></div><button class="btn secondary" id="refresh-scheduler">Обновить</button></div>
+        <div id="scheduler-summary" class="check-summary">Планировщик ещё не загружен</div>
+        <div id="scheduler-decisions" class="check-list"><div class="empty">Нет решений</div></div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3>Торговый журнал и статистика</h3><p>Отображаются только сделки, подтверждённые торговым контуром и сохранённые в DEMO-журнале. Реальное исполнение отключено.</p></div><button class="btn secondary" id="refresh-trades">Обновить</button></div>
+        <div id="trade-summary" class="check-summary">Журнал ещё не загружен</div>
+        <div id="trade-breakdown" class="check-list"><div class="empty">Пока нет закрытых сделок</div></div>
+        <div class="form-actions"><button class="btn secondary" id="toggle-trading-pause">Снять паузу шлюза</button><span id="trading-gate-state" class="muted">Шлюз остановлен</span></div>
+      </article>
+      <article class="panel-card">
+        <div class="panel-head"><div><h3>Рыночный поток Pocket Option</h3><p>Наблюдение за разрешёнными WebSocket-событиями. Торговые команды не отправляются.</p></div><span class="pill" id="market-stream-state">Нет данных</span></div>
         <div id="market-data-summary" class="check-summary">Ожидание рыночных событий</div>
         <div id="market-assets" class="check-list"><div class="empty">Поток ещё не получен</div></div>
+        <div class="form-actions"><button class="btn secondary" id="refresh-market-diagnostics">Проверить OTC-пары</button><span id="market-diagnostic-summary" class="muted">Ожидание диагностики</span></div>
+        <div id="market-diagnostic-assets" class="check-list"><div class="empty">Диагностика ещё не запускалась</div></div>
       </article>
     </section>
     <section class="page" id="page-logs">
