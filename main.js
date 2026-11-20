@@ -358,7 +358,7 @@ ipcMain.handle('analysis:scheduler-status', event => {
 });
 ipcMain.handle('trades:summary', event => {
   requireTrustedMainRenderer(event);
-  return tradeLedger ? { status: tradeLedger.getStatus(), trades: tradeLedger.list().slice(0, 200) } : { status: null, trades: [] };
+  return tradeLedger ? { status: tradeLedger.getStatus(), gate: tradingGate ? tradingGate.getState() : null, trades: tradeLedger.list().slice(0, 200) } : { status: null, gate: null, trades: [] };
 });
 ipcMain.handle('trades:pause', (event, paused) => {
   requireTrustedMainRenderer(event);
