@@ -66,7 +66,7 @@ class TradeExecutionAdapter{
   return{ok:true,status:'SUBMITTED_UNCONFIRMED',trade:record,pageResult:result};
  }
  async handleCloseEvent(payload){
-  const wrappers=Array.isArray(payload)?payload:[payload];const deals=wrappers.flatMap(item=>Array.isArray(item&&item.deals)?item.deals:(item&&typeof item==='object'?[item]:[]));
+  const wrappers=Array.isArray(payload)?payload:[payload];const deals=wrappers.flatMap(item=>Array.isArray(item&&item.deals)?item.deals.map(deal=>({...deal,balanceAfter:deal&&deal.balanceAfter!=null?deal.balanceAfter:item.balanceAfter??item.balance} )):(item&&typeof item==='object'?[item]:[]));
   const results=[];
   for(const deal of deals){
    if(!deal||typeof deal!=='object')continue;
