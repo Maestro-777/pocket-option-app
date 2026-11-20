@@ -186,9 +186,15 @@ function toggleWidget() {
   refreshTrayMenu(); publishStatus();
 }
 function injectSiteBridge(win) {
+  if (!win || win.isDestroyed() || win.webContents.isLoading()) return;
   try {
     const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
-    win.webContents.executeJavaScript(source, true).catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', String(error)));
+    const url = win.webContents.getURL();
+    win.webContents.executeJavaScript(source, true)
+      .then(() => log('info', 'Адаптер Pocket Option внедрён', { url }))
+      .catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', {
+        url, error: String(error)
+      }));
   } catch (error) { log('error', 'Файл адаптера не найден', String(error)); }
 }
 function launchSite() {
@@ -210,7 +216,6 @@ function launchSite() {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
     injectSiteBridge(siteWindow); publishStatus();
   });
-  siteWindow.webContents.on('dom-ready', () => injectSiteBridge(siteWindow));
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
   siteWindow.webContents.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
     if (isMainFrame && code !== -3) log('error', 'Ошибка загрузки Pocket Option', { code, description, url });
