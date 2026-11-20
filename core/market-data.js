@@ -279,6 +279,17 @@ class MarketDataService {
     return result.accepted ? result.count : 0;
   }
   ingestEvent(eventName, payload, receivedAt = Date.now()) {
+    if (eventName === 'updateAssets') return this.ingestAssets(payload);
+    const event = parseMarketEvent(eventName, payload, receivedAt);
+    if (!event) return { accepted: false, reason: 'unsupported-or-invalid-payload' };
+    this.store.eventCount++;
+    this.store.lastEventAt = receivedAt;
+    this.store.lastEventName = eventName;
+    if (event.kind === 'history') {
+      // Historical OHLC is kept in the candle store, not counted as live ticks.
+      for (const candle of event.candles || []) this.store._ingestCandle(candle);
+      return { accepted: true, kind: 'history', count: (event.candles || []).length };
+    }
     return this.store.ingest(eventName, payload, receivedAt);
   }
   ingest(tick) {
@@ -298,10 +309,18 @@ class MarketDataService {
   }
   getCandles(asset, timeframe, options = {}) {
     const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500));
-    return this.store.getAggregatedCandles(asset, timeframe, {
-      asOf: options.asOf == null ? Date.now() : Number(options.asOf),
-      includeIncomplete: options.includeIncomplete === true
-    }).filter(candle => options.includeIncomplete === true || candle.complete).slice(-limit);
+    const asOf = options.asOf == null ? Date.now() : Number(options.asOf);
+    const duration = require('./timeframes').getTimeframeDuration(timeframe);
+    const historical = this.store.getCandles(asset, duration / 1000, 2000)
+      .filter(candle => candle.endAt <= asOf && (options.includeIncomplete === true || candle.complete))
+      .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase() }));
+    const live = this.store.getAggregatedCandles(asset, timeframe, {
+      asOf, includeIncomplete: options.includeIncomplete === true
+    }).filter(candle => options.includeIncomplete === true || candle.complete);
+    const merged = new Map();
+    for (const candle of live) merged.set(candle.startAt, candle);
+    for (const candle of historical) merged.set(candle.startAt, candle);
+    return Array.from(merged.values()).sort((a, b) => a.startAt - b.startAt).slice(-limit);
   }
   getLatestDataTime(asset, timeframe) {
     const rows = this.getCandles(asset, timeframe, { limit: 2000 });
