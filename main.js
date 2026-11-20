@@ -256,8 +256,11 @@ function requireTrustedMainRenderer(event) {
 }
 ipcMain.handle('analysis:get-assets', event => {
   requireTrustedMainRenderer(event);
-  return marketDataStore.getSnapshot().assets.filter(item => item.isOtc)
-    .map(item => ({ asset: item.asset, lastPrice: item.lastPrice, lastTickAt: item.lastTickAt, ageMs: item.ageMs }));
+  const observed = new Map(marketDataStore.getSnapshot().assets.map(item => [item.asset, item]));
+  const catalog = Array.from(marketDataStore.catalog.values()).filter(item => item.isOtc);
+  const assets = new Map(catalog.map(item => [item.asset, { asset: item.asset, label: item.label, lastPrice: null, lastTickAt: null, ageMs: null }]));
+  for (const item of observed.values()) if (item.isOtc) assets.set(item.asset, { ...assets.get(item.asset), ...item });
+  return Array.from(assets.values()).sort((a, b) => a.asset.localeCompare(b.asset));
 });
 ipcMain.handle('analysis:get-candles', (event, request = {}) => {
   requireTrustedMainRenderer(event);
