@@ -40,3 +40,7 @@
 - JavaScript syntax: passed
 - Windows installer build: passed
 - Live Pocket Option DEMO smoke test: не проводился; это остаётся обязательным runtime этапом.
+## Последние исправления (2026-11-20)
+- Исправлена проверка доступных слотов SignalScheduler: тест использует публичное поле `getStatus().availableSlots`.
+- Исправлена передача `balance`/`balanceAfter` из envelope события закрытия брокера в запись соответствующей сделки.
+- Эти изменения находятся в commit `2a8942b9c5ecae55c6b1758e5ad01c8d8c9cd41e`; повторный CI для актуального head ещё ожидается. До получения результата не считать Windows build подтверждённым.
