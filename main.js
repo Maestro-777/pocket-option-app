@@ -7,7 +7,13 @@ const { app, BrowserWindow, Tray, Menu, ipcMain, session, nativeImage, shell, di
 const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
-const { MarketDataStore } = require('./core/market-data');
+const { MarketDataService } = require('./core/market-data');
+const { MarketDataStore: MarketDataPersistence } = require('./core/market-data-store');
+const { SignalScheduler } = require('./core/signal-scheduler');
+const { ScanStateStore } = require('./core/scan-state-store');
+const { TradeLedger } = require('./core/trade-ledger');
+const { TradingGate } = require('./core/trading-gate');
+const TradeExecutionAdapter = require('./core/trade-execution');
 const { ExampleStore } = require('./core/example-store');
 const { DecisionJournal } = require('./core/decision-journal');
 const { analyzeSituation, normalizeConfig } = require('./core/matcher');
@@ -45,7 +51,14 @@ let selectedAccount = 'DEMO';
 let updateState = { status: 'idle', version: null, progress: 0, message: 'Проверка не выполнялась' };
 let moduleManager = null;
 let startupStage = 'module initialization';
-const marketDataStore = new MarketDataStore();
+const marketDataStore = new MarketDataService();
+let marketDataPersistence = null;
+let marketDataSaveTimer = null;
+let signalScheduler = null;
+let scanStateStore = null;
+let tradeLedger = null;
+let tradingGate = null;
+let tradeExecution = null;
 let exampleStore = null;
 let decisionJournal = null;
 let marketBatchWindowAt = 0;
@@ -58,7 +71,9 @@ let settings = {
   reconnectDelaySeconds: 30,
   maxReloadsPer10Minutes: 3,
   autoCheckUpdates: true,
-  analysisConfig: { topK: 10, similarityThreshold: 80, minExamples: 3, minDirectionalMatches: 6, patternLength: 30 }
+  analysisConfig: { topK: 10, similarityThreshold: 80, minExamples: 3, minDirectionalMatches: 6, patternLength: 30 },
+  schedulerConfig: { enabled: true, timeframes: ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'], lookback: 300, maxOpenTrades: 1, scanIntervalMs: 1500 },
+  autoTradingEnabled: false
 };
 
 const userRoot = () => app.getPath('userData');
@@ -230,7 +245,7 @@ function getPublicStatus() {
       url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : null
     },
     network: { online: lastNetworkOk, checkedAt: lastNetworkCheckAt },
-    marketData: marketDataStore.getSnapshot(),
+    marketData: marketDataStore.store.getSnapshot(),
     account: {
       type: lastBalance?.accountType || selectedAccount.toLowerCase(),
       balance: lastBalance?.balance ?? null, currency: lastBalance?.currency || '',
@@ -258,7 +273,7 @@ function requireTrustedMainRenderer(event) {
 ipcMain.handle('analysis:get-assets', event => {
   requireTrustedMainRenderer(event);
   const observed = new Map(marketDataStore.getSnapshot().assets.map(item => [item.asset, item]));
-  const catalog = Array.from(marketDataStore.catalog.values()).filter(item => item.isOtc);
+  const catalog = Array.from(marketDataStore.store.catalog.values()).filter(item => item.isOtc);
   const assets = new Map(catalog.map(item => [item.asset, { asset: item.asset, label: item.label, lastPrice: null, lastTickAt: null, ageMs: null }]));
   for (const item of observed.values()) if (item.isOtc) assets.set(item.asset, { ...assets.get(item.asset), ...item });
   return Array.from(assets.values()).sort((a, b) => a.asset.localeCompare(b.asset));
@@ -270,7 +285,7 @@ ipcMain.handle('analysis:get-candles', (event, request = {}) => {
   const limit = Math.max(2, Math.min(2000, Number(request.limit) || 300));
   getTimeframeDuration(timeframe);
   if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
-  return marketDataStore.getAggregatedCandles(asset, timeframe, { asOf: Date.now() })
+  return marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit: 2000 })
     .filter(candle => candle.complete).slice(-limit);
 });
 ipcMain.handle('examples:list', async (event, filters = {}) => {
@@ -315,6 +330,23 @@ ipcMain.handle('analysis:run', async (event, request = {}) => {
   }, decision.settingsSnapshot);
   return { decision, candleCount: candles.length, exampleCount: examples.length };
 });
+
+ipcMain.handle('analysis:scheduler-status', event => {
+  requireTrustedMainRenderer(event);
+  return { scheduler: signalScheduler ? signalScheduler.getStatus() : null,
+    recent: signalScheduler ? signalScheduler.getRecentDecisions().slice(0, 100) : [],
+    market: marketDataStore.getStatus() };
+});
+ipcMain.handle('trades:summary', event => {
+  requireTrustedMainRenderer(event);
+  return tradeLedger ? { status: tradeLedger.getStatus(), trades: tradeLedger.list().slice(0, 200) } : { status: null, trades: [] };
+});
+ipcMain.handle('trades:pause', (event, paused) => {
+  requireTrustedMainRenderer(event);
+  if (!tradingGate) return { ok: false };
+  return { ok: true, state: tradingGate.setPaused(paused === true), autoTradingEnabled: false };
+});
+
 ipcMain.handle('analysis:journal', async event => {
   requireTrustedMainRenderer(event);
   return decisionJournal.readRecent(200);
@@ -436,7 +468,7 @@ ipcMain.on('site:market-batch', (event, batch) => {
 
   let accepted = 0;
   for (const item of safeBatch) {
-    const result = marketDataStore.ingest(item.eventName, item.payload, item.receivedAt);
+    const result = marketDataStore.ingestEvent(item.eventName, item.payload, item.receivedAt);
     if (result.accepted) accepted++;
   }
   if (accepted) {
@@ -596,6 +628,9 @@ async function runFullCheck(source) {
 }
 
 app.on('before-quit', () => {
+  if (signalScheduler) signalScheduler.stop();
+  if (marketDataSaveTimer) { clearInterval(marketDataSaveTimer); clearTimeout(marketDataSaveTimer); marketDataSaveTimer = null; }
+  try { if (marketDataPersistence) marketDataPersistence.saveSync(); } catch (error) { log('error', 'Не удалось синхронно сохранить архив котировок', String(error)); }
   quitting = true; clearInterval(healthTimer); clearInterval(fullCheckTimer); clearInterval(updateCheckTimer); clearTimeout(updateCheckTimeout);
   if (moduleManager) moduleManager.stopAll().catch(error => log('error', 'Ошибка остановки модулей', String(error)));
   log('info', 'Приложение завершает работу');
@@ -628,6 +663,31 @@ if (!lock) {
   const dataDirectory = userRoot();
   exampleStore = new ExampleStore(path.join(dataDirectory, 'examples.json'));
   decisionJournal = new DecisionJournal(path.join(dataDirectory, 'decision-journal.jsonl'));
+  marketDataPersistence = new MarketDataPersistence(marketDataStore, path.join(dataDirectory, 'market-data.snapshot.json'));
+  const restoredMarket = await marketDataPersistence.load();
+  if (restoredMarket) log('info', 'История котировок восстановлена', restoredMarket);
+  scanStateStore = new ScanStateStore(path.join(dataDirectory, 'scan-state.json'));
+  tradeLedger = new TradeLedger(path.join(dataDirectory, 'trade-ledger.json'));
+  await tradeLedger.load();
+  tradingGate = new TradingGate();
+  tradeExecution = new TradeExecutionAdapter({
+    gate: tradingGate, marketData: marketDataStore, journal: decisionJournal, ledger: tradeLedger,
+    getSettings: () => ({ ...settings, autoTradingEnabled: false }),
+    getAccount: () => ({ mode: 'DEMO', accountType: lastBalance?.accountType, balance: lastBalance?.balance, url: siteWindow && !siteWindow.isDestroyed() ? siteWindow.webContents.getURL() : '' }),
+    getSiteWindow: () => siteWindow,
+    onUpdate: update => log(update.type === 'rejected' ? 'warn' : 'info', 'Состояние торгового контура', update)
+  });
+  tradeExecution.restore(tradeLedger.listOpen());
+  if (tradeLedger.listOpen().length) tradingGate.restoreOpenTrades(tradeLedger.listOpen());
+  signalScheduler = new SignalScheduler({
+    marketData: marketDataStore, exampleStore, journal: decisionJournal, stateStore: scanStateStore,
+    getConfig: () => ({ ...settings.schedulerConfig, matcher: settings.analysisConfig }),
+    getOpenTradeCount: () => tradeLedger.listOpen().length,
+    onDecision: item => { if (item.decision?.accepted) log('info', 'Планировщик обнаружил подтверждённый кандидат', { asset: item.asset, timeframe: item.timeframe, direction: item.decision.direction, similarity: item.decision.averageSimilarity, signalId: item.signalId }); },
+    onError: error => log('error', 'Ошибка планировщика анализа', String(error?.stack || error))
+  });
+  await signalScheduler.restoreState();
+  signalScheduler.restoreProcessedDecisions(await decisionJournal.readRecent(500));
   await exampleStore.list();
   startupStage = 'create-main-window';
   createMainWindow();
@@ -638,6 +698,9 @@ if (!lock) {
   await moduleManager.loadAll();
   startupStage = 'create-mini-widget';
   if (settings.showMiniWidget) createMiniWindow().show();
+  startupStage = 'start-analysis-scheduler';
+  signalScheduler.start();
+  marketDataSaveTimer = setInterval(() => marketDataPersistence.save().catch(error => log('error', 'Ошибка периодического сохранения котировок', String(error))), 15000);
   startupStage = 'start-monitoring-timers';
   healthTimer = setInterval(() => healthTick().catch(error => log('error', 'Health tick failed', error?.stack || String(error))), HEALTH_INTERVAL);
   fullCheckTimer = setInterval(() => runFullCheck('scheduled').catch(error => log('error', 'Full check failed', error?.stack || String(error))), Math.max(5, Number(settings.monitorIntervalMinutes) || 5) * 60_000);
