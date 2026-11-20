@@ -8,6 +8,10 @@ const { autoUpdater } = require('electron-updater');
 const archiver = require('archiver');
 const ModuleManager = require('./modules/manager');
 const { MarketDataStore } = require('./core/market-data');
+const { ExampleStore } = require('./core/example-store');
+const { DecisionJournal } = require('./core/decision-journal');
+const { analyzeSituation, normalizeConfig } = require('./core/matcher');
+const { getTimeframeDuration } = require('./core/timeframes');
 const { isTrustedPocketOptionFrame, validateBalancePayload, validateMarketBatch } = require('./core/ipc-validation');
 
 const APP_NAME = 'Pocket Option Background';
@@ -42,6 +46,8 @@ let updateState = { status: 'idle', version: null, progress: 0, message: 'Про
 let moduleManager = null;
 let startupStage = 'module initialization';
 const marketDataStore = new MarketDataStore();
+let exampleStore = null;
+let decisionJournal = null;
 let marketBatchWindowAt = 0;
 let marketBatchCount = 0;
 let marketStatusPublishedAt = 0;
@@ -239,6 +245,76 @@ function publishStatus() {
   if (miniWindow && !miniWindow.isDestroyed()) miniWindow.webContents.send('app:status', status);
   return status;
 }
+
+function isTrustedMainRenderer(event) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  return event.sender === mainWindow.webContents &&
+    event.senderFrame === mainWindow.webContents.mainFrame;
+}
+function requireTrustedMainRenderer(event) {
+  if (!isTrustedMainRenderer(event)) throw new Error('Недоверенный IPC-отправитель');
+}
+ipcMain.handle('analysis:get-assets', event => {
+  requireTrustedMainRenderer(event);
+  return marketDataStore.getSnapshot().assets.filter(item => item.isOtc)
+    .map(item => ({ asset: item.asset, lastPrice: item.lastPrice, lastTickAt: item.lastTickAt, ageMs: item.ageMs }));
+});
+ipcMain.handle('analysis:get-candles', (event, request = {}) => {
+  requireTrustedMainRenderer(event);
+  const asset = String(request.asset || '').trim().toUpperCase();
+  const timeframe = String(request.timeframe || '').toUpperCase();
+  const limit = Math.max(2, Math.min(2000, Number(request.limit) || 300));
+  getTimeframeDuration(timeframe);
+  if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
+  return marketDataStore.getAggregatedCandles(asset, timeframe, { asOf: Date.now() })
+    .filter(candle => candle.complete).slice(-limit);
+});
+ipcMain.handle('examples:list', async (event, filters = {}) => {
+  requireTrustedMainRenderer(event);
+  return exampleStore.list({ timeframe: filters.timeframe, pair: filters.pair });
+});
+ipcMain.handle('examples:add', async (event, input) => {
+  requireTrustedMainRenderer(event);
+  const row = await exampleStore.add(input);
+  await decisionJournal.append('DECISION', { action: 'manual_example_added', exampleId: row.id, pair: row.pair, timeframe: row.timeframe });
+  return row;
+});
+ipcMain.handle('examples:update', async (event, request = {}) => {
+  requireTrustedMainRenderer(event);
+  const row = await exampleStore.update(request.id, request.patch || {});
+  await decisionJournal.append('DECISION', { action: 'manual_example_updated', exampleId: row.id });
+  return row;
+});
+ipcMain.handle('examples:remove', async (event, id) => {
+  requireTrustedMainRenderer(event);
+  const removed = await exampleStore.remove(id);
+  if (removed) await decisionJournal.append('DECISION', { action: 'manual_example_removed', exampleId: String(id) });
+  return { ok: removed };
+});
+ipcMain.handle('analysis:run', async (event, request = {}) => {
+  requireTrustedMainRenderer(event);
+  const asset = String(request.asset || '').trim().toUpperCase();
+  const timeframe = String(request.timeframe || '').toUpperCase();
+  getTimeframeDuration(timeframe);
+  if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
+  const config = normalizeConfig(request.config || {});
+  const candles = marketDataStore.getAggregatedCandles(asset, timeframe, { asOf: Date.now() })
+    .filter(candle => candle.complete).slice(-Math.max(config.patternLength, Math.min(2000, Number(request.lookback) || 300)));
+  const examples = await exampleStore.list({ timeframe });
+  const entryAt = candles.length ? candles[candles.length - 1].endAt : Date.now();
+  const decision = analyzeSituation({ candles, timeframe, entryAt, examples, config });
+  await decisionJournal.append('DECISION', {
+    asset, timeframe, entryAt, accepted: decision.accepted, direction: decision.direction,
+    reason: decision.reason, matchCount: decision.matchCount, upVotes: decision.upVotes,
+    downVotes: decision.downVotes, averageSimilarity: decision.averageSimilarity,
+    matches: decision.matches
+  }, decision.settingsSnapshot);
+  return { decision, candleCount: candles.length, exampleCount: examples.length };
+});
+ipcMain.handle('analysis:journal', async event => {
+  requireTrustedMainRenderer(event);
+  return decisionJournal.readRecent(200);
+});
 
 ipcMain.handle('app:get-status', () => getPublicStatus());
 ipcMain.handle('app:launch-site', () => { launchSite(); return { ok: true }; });
@@ -534,6 +610,10 @@ if (!lock) {
   log('info', 'Начало запуска', { version: app.getVersion(), packaged: app.isPackaged, electron: process.versions.electron, arch: process.arch, appPath: app.getAppPath() });
   startupStage = 'load-settings';
   loadSettings();
+  const dataDirectory = userRoot();
+  exampleStore = new ExampleStore(path.join(dataDirectory, 'examples.json'));
+  decisionJournal = new DecisionJournal(path.join(dataDirectory, 'decision-journal.jsonl'));
+  await exampleStore.list();
   startupStage = 'create-main-window';
   createMainWindow();
   startupStage = 'create-tray';
