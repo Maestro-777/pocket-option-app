@@ -57,7 +57,8 @@
       {
         "provider": "github",
         "owner": "Maestro-777",
-        "repo": "pocket-option-app"
+        "repo": "pocket-option-app",
+        "releaseType": "release"
       }
     ]
   }
