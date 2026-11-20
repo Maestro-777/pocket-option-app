@@ -56,7 +56,13 @@
   }
   async function analyze() {
     const asset=$('wb-asset').value;if(!asset)throw new Error('Выбери OTC-пару для анализа.');
-    const result=await api.analyzeSituation({asset,timeframe:$('wb-timeframe').value,lookback:Number($('wb-limit').value),config:{topK:10,similarityThreshold:80,minExamples:3,minDirectionalMatches:6,patternLength:30}});
+    const config={topK:Number($('wb-topk').value),similarityThreshold:Number($('wb-threshold').value),minExamples:Number($('wb-min-examples').value),minDirectionalMatches:Number($('wb-votes').value),patternLength:Number($('wb-pattern').value)};
+    if(!Number.isInteger(config.topK)||config.topK<1||config.topK>100)throw new Error('Top K должен быть от 1 до 100.');
+    if(!Number.isFinite(config.similarityThreshold)||config.similarityThreshold<0||config.similarityThreshold>100)throw new Error('Порог сходства должен быть от 0 до 100.');
+    if(!Number.isInteger(config.minExamples)||config.minExamples<1||config.minExamples>config.topK)throw new Error('Минимум примеров должен быть от 1 до Top K.');
+    if(!Number.isInteger(config.minDirectionalMatches)||config.minDirectionalMatches<1||config.minDirectionalMatches>config.topK)throw new Error('Число подтверждений должно быть от 1 до Top K.');
+    if(!Number.isInteger(config.patternLength)||config.patternLength<2||config.patternLength>500)throw new Error('Длина паттерна должна быть от 2 до 500.');
+    const result=await api.analyzeSituation({asset,timeframe:$('wb-timeframe').value,lookback:Number($('wb-limit').value),config});
     const d=result.decision;
     $('wb-analysis').innerHTML='<b>'+(d.accepted?'Подтверждённое направление: '+esc(d.direction):'Сигнал не подтверждён')+'</b><br>Причина: '+esc(d.reason)+'<br>Совпадений: '+d.matchCount+' · UP: '+d.upVotes+' · DOWN: '+d.downVotes+'<br>Среднее сходство: '+d.averageSimilarity.toFixed(2)+'%<br><small>'+esc(d.disclaimer)+'</small>'+
       (d.matches.map(m=>'<div class="log-entry"><b>'+esc(m.sourcePair)+'</b><span>'+esc(m.direction)+'</span><span>'+Number(m.similarity).toFixed(2)+'%</span><span>'+esc(m.outcome)+'</span></div>').join('')||'<div class="empty">Совпадений нет</div>');
