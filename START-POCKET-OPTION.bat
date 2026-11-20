@@ -1,92 +1,84 @@
 @echo off
-chcp 65001 >nul
 setlocal
-title Pocket Option Background - обновление и запуск
-
+title Pocket Option Background - Update and Launch
 cd /d "%~dp0"
+
 echo.
 echo ================================================
 echo   Pocket Option Background
-echo   Обновление исходников и запуск
+echo   Update source code and launch
 echo ================================================
 echo.
 
 if not exist ".git" (
-  echo [ОШИБКА] Папка .git не найдена.
-  echo Сначала клонируйте репозиторий:
-  echo https://github.com/Maestro-777/pocket-option-app
+  echo [ERROR] Git repository not found in this folder.
+  echo Clone first: https://github.com/Maestro-777/pocket-option-app
   goto :failed
 )
 
 where git >nul 2>&1
 if errorlevel 1 (
-  echo [ОШИБКА] Git не найден. Установите Git for Windows.
+  echo [ERROR] Git for Windows is not installed or not in PATH.
   goto :failed
 )
 
 where node >nul 2>&1
 if errorlevel 1 (
-  echo [ОШИБКА] Node.js не найден. Установите Node.js 22 LTS или новее.
+  echo [ERROR] Node.js 22 LTS or newer is required.
   goto :failed
 )
 
 where npm >nul 2>&1
 if errorlevel 1 (
-  echo [ОШИБКА] npm не найден. Переустановите Node.js с npm.
+  echo [ERROR] npm was not found. Reinstall Node.js with npm.
   goto :failed
 )
 
-for /f "delims=" %%V in ('node -p "Number(process.versions.node.split('.')[0])"') do set NODE_MAJOR=%%V
-if not defined NODE_MAJOR (
-  echo [ОШИБКА] Не удалось определить версию Node.js.
-  goto :failed
-)
-if %NODE_MAJOR% LSS 22 (
-  echo [ОШИБКА] Требуется Node.js 22 или новее. Установлена версия:
+node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)"
+if errorlevel 1 (
+  echo [ERROR] Node.js 22 or newer is required. Installed version:
   node --version
   goto :failed
 )
 
-echo [1/4] Получаю последние исходники из ветки main...
+echo [1/4] Updating source code from origin/main...
 git pull --ff-only origin main
 if errorlevel 1 (
   echo.
-  echo [ОШИБКА] Не удалось обновить исходники.
-  echo Проверьте интернет и локальные изменения в папке проекта.
-  echo Скрипт не перезаписывает ваши локальные изменения.
+  echo [ERROR] Could not update source code.
+  echo Check your internet connection and local changes.
+  echo Local changes are not overwritten.
   goto :failed
 )
 
 echo.
-echo [2/4] Устанавливаю/обновляю зависимости...
+echo [2/4] Installing dependencies...
 call npm install
 if errorlevel 1 (
-  echo [ОШИБКА] npm install завершился с ошибкой.
+  echo [ERROR] npm install failed.
   goto :failed
 )
 
 echo.
-echo [3/4] Проверяю исходники...
+echo [3/4] Checking source code...
 call npm run check
 if errorlevel 1 (
-  echo [ОШИБКА] Проверка исходников не пройдена. Запуск отменён.
+  echo [ERROR] Source checks failed. Launch cancelled.
   goto :failed
 )
 
 echo.
-echo [4/4] Запускаю приложение...
-echo Для следующего запуска снова используйте этот BAT-файл.
-echo.
+echo [4/4] Launching application...
 call npm start
-set APP_EXIT=%ERRORLEVEL%
+set "APP_EXIT=%ERRORLEVEL%"
 
 echo.
-echo Приложение завершило работу (код: %APP_EXIT%).
+echo Application exited with code %APP_EXIT%.
 pause
 exit /b %APP_EXIT%
 
 :failed
 echo.
-echo Исправьте указанную выше проблему и запустите BAT-файл снова.
+echo Fix the problem shown above, then run this file again.
 pause
 exit /b 1
