@@ -2,6 +2,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 const api = {
   getStatus: () => ipcRenderer.invoke('app:get-status'),
+  getAnalysisAssets: () => ipcRenderer.invoke('analysis:get-assets'),
+  getAnalysisCandles: request => ipcRenderer.invoke('analysis:get-candles', request),
+  listExamples: filters => ipcRenderer.invoke('examples:list', filters),
+  addExample: input => ipcRenderer.invoke('examples:add', input),
+  updateExample: request => ipcRenderer.invoke('examples:update', request),
+  removeExample: id => ipcRenderer.invoke('examples:remove', id),
+  analyzeSituation: request => ipcRenderer.invoke('analysis:run', request),
+  readDecisionJournal: () => ipcRenderer.invoke('analysis:journal'),
   launchSite: () => ipcRenderer.invoke('app:launch-site'),
   showSite: () => ipcRenderer.invoke('app:show-site'),
   hideSite: () => ipcRenderer.invoke('app:hide-site'),
