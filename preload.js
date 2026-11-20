@@ -13,6 +13,7 @@ const api = {
   saveAnalysisSettings: config => ipcRenderer.invoke('analysis:settings:save', config),
   readDecisionJournal: () => ipcRenderer.invoke('analysis:journal'),
   getSchedulerStatus: () => ipcRenderer.invoke('analysis:scheduler-status'),
+  getMarketDiagnostics: () => ipcRenderer.invoke('market:diagnostics'),
   getTradeSummary: () => ipcRenderer.invoke('trades:summary'),
   setTradingPaused: value => ipcRenderer.invoke('trades:pause', value),
   launchSite: () => ipcRenderer.invoke('app:launch-site'),
