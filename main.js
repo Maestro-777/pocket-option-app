@@ -186,10 +186,11 @@ function toggleWidget() {
   refreshTrayMenu(); publishStatus();
 }
 function injectSiteBridge(win) {
-  if (!win || win.isDestroyed() || win.webContents.isLoading()) return;
+  if (!win || win.isDestroyed()) return;
+  const url = win.webContents.getURL();
+  if (!/^https:\/\/(?:[^/]+\.)?pocketoption\.com\//i.test(url)) return;
   try {
     const source = fs.readFileSync(path.join(__dirname, 'site-bridge.js'), 'utf8');
-    const url = win.webContents.getURL();
     win.webContents.executeJavaScript(source, true)
       .then(() => log('info', 'Адаптер Pocket Option внедрён', { url }))
       .catch(error => log('warn', 'Не удалось внедрить адаптер Pocket Option', {
@@ -214,7 +215,15 @@ function launchSite() {
   siteWindow.webContents.setBackgroundThrottling(false);
   siteWindow.webContents.on('did-finish-load', () => {
     log('info', 'Страница Pocket Option загружена', { url: siteWindow.webContents.getURL() });
-    injectSiteBridge(siteWindow); publishStatus();
+    publishStatus();
+  });
+  // did-stop-loading fires after the final navigation/redirect; inject here to
+  // avoid executeJavaScript racing the page's document commit.
+  siteWindow.webContents.on('did-stop-loading', () => {
+    if (siteWindow && !siteWindow.isDestroyed()) {
+      injectSiteBridge(siteWindow);
+      publishStatus();
+    }
   });
   siteWindow.webContents.on('did-start-loading', () => { log('info', 'Pocket Option: началась загрузка'); publishStatus(); });
   siteWindow.webContents.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
