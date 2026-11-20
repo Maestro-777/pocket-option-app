@@ -76,17 +76,41 @@ function saveSettings() {
   fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2), 'utf8');
 }
 function createMainWindow() {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1180, height: 820, minWidth: 980, minHeight: 680,
-    show: false, title: APP_NAME, backgroundColor: '#0b1020', autoHideMenuBar: true,
+    show: true, title: APP_NAME, backgroundColor: '#0b1020', autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true }
   });
-  mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
-  mainWindow.on('close', event => {
-    if (!quitting) { event.preventDefault(); mainWindow.hide(); log('info', 'Главное окно скрыто в системный трей'); }
+  mainWindow = window;
+  window.once('ready-to-show', () => {
+    if (!window.isDestroyed()) { window.show(); window.focus(); }
+    log('info', 'Главное окно готово к отображению');
   });
-  mainWindow.on('closed', () => { mainWindow = null; });
+  window.webContents.on('did-finish-load', () => {
+    log('info', 'Интерфейс главного окна загружен');
+    if (!window.isDestroyed() && !window.isVisible()) window.show();
+  });
+  window.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (isMainFrame) log('error', 'Не удалось загрузить интерфейс приложения', { code, description, url });
+    if (!window.isDestroyed() && !window.isVisible()) window.show();
+  });
+  window.webContents.on('render-process-gone', (_event, details) => {
+    log('error', 'Процесс интерфейса завершился', details);
+  });
+  window.webContents.on('console-message', (_event, details) => {
+    if (details.level >= 2) log('error', 'Ошибка JavaScript интерфейса', {
+      message: details.message, line: details.lineNumber, source: details.sourceId
+    });
+  });
+  window.on('unresponsive', () => log('error', 'Главное окно перестало отвечать'));
+  window.on('close', event => {
+    if (!quitting) { event.preventDefault(); window.hide(); log('info', 'Главное окно скрыто в системный трей'); }
+  });
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
+  window.loadFile(path.join(__dirname, 'renderer', 'index.html')).catch(error => {
+    log('error', 'Ошибка открытия главного интерфейса', String(error));
+    if (!window.isDestroyed()) window.show();
+  });
 }
 function createMiniWindow() {
   if (miniWindow && !miniWindow.isDestroyed()) return miniWindow;
