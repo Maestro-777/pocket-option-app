@@ -8,7 +8,7 @@
     "start": "electron .",
     "dist": "electron-builder --win nsis --publish never",
     "pack": "electron-builder --dir --win --publish never",
-    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check core/market-data.js && node --check core/ipc-validation.js && node --check test/market-data.test.js && node --check test/ipc-validation.test.js && node --check modules/manager.js && node --check modules/example/index.js",
+    "check": "node --check main.js && node --check preload.js && node --check site-preload.js && node --check site-bridge.js && node --check renderer/app.js && node --check renderer/widget.js && node --check core/timeframes.js && node --check core/market-data.js && node --check core/ipc-validation.js && node --check test/market-data.test.js && node --check test/ipc-validation.test.js && node --check modules/manager.js && node --check modules/example/index.js && node --check core/asset-catalog.js && node --check core/decision-journal.js && node --check core/example-store.js && node --check core/market-data-capture.js && node --check core/market-data-store.js && node --check core/matcher.js && node --check core/patterns.js && node --check core/pocketoption-protocol.js && node --check core/scan-state-store.js && node --check core/signal-scheduler.js && node --check core/trade-execution.js && node --check core/trade-ledger.js && node --check core/trading-gate.js && node --check renderer/workbench.js && node --check renderer/annotation.js",
     "test": "node --test"
   },
   "devDependencies": {

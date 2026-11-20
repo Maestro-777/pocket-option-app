@@ -10,6 +10,7 @@
     <div class="brand"><div class="brand-mark">PO</div><div><b>Pocket Option</b><small>BACKGROUND CONTROL</small></div></div>
     <nav id="nav">
       <button class="nav-item active" data-page="home"><span>⌂</span>Главная</button>
+      <button class="nav-item" data-page="workbench"><span>▦</span>Примеры и анализ</button>
       <button class="nav-item" data-page="monitor"><span>◉</span>Мониторинг</button>
       <button class="nav-item" data-page="logs"><span>≋</span>Журналы</button>
       <button class="nav-item" data-page="settings"><span>⚙</span>Настройки</button>
@@ -42,13 +43,79 @@
       </div>
       <article class="panel-card recent"><div class="panel-head"><div><h3>Последние события</h3><p>Системный журнал</p></div><button class="text-btn" data-goto="logs">Все события →</button></div><div id="recent-logs" class="log-list"><div class="empty">Событий пока нет</div></div></article>
     </section>
+    <section class="page" id="page-workbench">
+      <div class="page-intro"><h2>Исторические примеры и анализ</h2><p>Выбери OTC-пару и таймфрейм, отметь участок, точку входа и направление. Поиск использует только примеры того же таймфрейма.</p></div>
+      <article class="panel-card">
+        <div class="log-toolbar">
+          <select id="wb-asset"><option value="">Выбери OTC-пару</option></select>
+          <select id="wb-timeframe"><option>S5</option><option>S10</option><option>S15</option><option>S30</option><option>M1</option><option>M2</option><option>M3</option><option>M5</option><option>M10</option><option>M15</option></select>
+          <input id="wb-limit" type="number" min="30" max="2000" value="300" style="max-width:110px">
+          <button class="btn primary" id="wb-load">Загрузить свечи</button>
+        </div>
+        <div class="muted" id="wb-status">Ожидание данных. Открой Pocket Option и дождись рыночного потока.</div>
+        <div class="button-row" style="margin:12px 0">
+          <button class="btn secondary" data-wb-mode="start">Отметить начало</button>
+          <button class="btn secondary" data-wb-mode="entry">Отметить вход</button>
+          <button class="btn secondary" data-wb-mode="end">Отметить конец</button>
+          <button class="btn ghost" id="wb-clear">Сбросить отметки</button>
+        </div>
+        <div class="health-line"><span>Начало</span><b id="wb-start">—</b></div>
+        <div class="health-line"><span>Вход</span><b id="wb-entry">—</b></div>
+        <div class="health-line"><span>Конец</span><b id="wb-end">—</b></div>
+        <div id="wb-candles" class="all-logs" style="height:260px;margin-top:12px"><div class="empty">Свечи ещё не загружены</div></div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3 id="wb-editor-title">Сохранить ручной пример</h3><p>Для сравнения доступны только свечи до момента входа. Свечи после входа хранятся отдельно для результата.</p></div></div>
+        <div class="log-toolbar">
+          <select id="wb-direction"><option value="UP">ВВЕРХ (UP)</option><option value="DOWN">ВНИЗ (DOWN)</option></select>
+          <input id="wb-expiry" type="number" min="1" max="86400" value="60" aria-label="Экспирация, секунды">
+          <select id="wb-outcome"><option value="UNKNOWN">Неизвестно</option><option value="WIN">Победа</option><option value="LOSS">Поражение</option><option value="DRAW">Ничья</option></select>
+          <button class="btn primary" id="wb-save">Сохранить пример</button>
+          <button class="btn ghost" id="wb-cancel" hidden>Отмена редактирования</button>
+        </div>
+        <div class="muted" id="wb-save-status"></div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3>Поиск похожих ситуаций</h3><p>Сходство свечей — не вероятность выигрыша. Сравнение только в выбранном таймфрейме.</p></div><button class="btn primary" id="wb-analyze">Анализировать сейчас</button></div>
+        <div class="log-toolbar">
+          <label>Top K <input id="wb-topk" type="number" min="1" max="100" value="10"></label>
+          <label>Сходство, % <input id="wb-threshold" type="number" min="0" max="100" step="0.5" value="80"></label>
+          <label>Мин. примеров <input id="wb-min-examples" type="number" min="1" max="100" value="3"></label>
+          <label>Голосов направления <input id="wb-votes" type="number" min="1" max="100" value="6"></label>
+          <label>Длина паттерна <input id="wb-pattern" type="number" min="2" max="500" value="30"></label>
+        </div>
+        <div class="muted">Параметры применяются к следующему запуску анализа. Top K ограничивает число совпадений; число голосов должно быть не больше Top K.</div>
+        <div id="wb-analysis" class="check-summary">Анализ ещё не запускался</div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3>База ручных примеров</h3><button class="btn secondary" id="wb-refresh">Обновить список</button></div></div>
+        <div id="wb-examples" class="check-list"><div class="empty">Примеров пока нет</div></div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3>Журнал решений</h3><p>Здесь отражаются как подтверждённые направления, так и отказы анализатора.</p></div><button class="btn secondary" id="wb-journal-refresh">Обновить журнал</button></div>
+        <div id="wb-journal" class="check-list"><div class="empty">Журнал ещё не загружен</div></div>
+      </article>
+    </section>
     <section class="page" id="page-monitor">
       <div class="page-intro"><h2>Мониторинг устойчивости</h2><p>Полная проверка выполняется автоматически каждые 5 минут. Проверка сети и восстановления — чаще.</p><button class="btn primary" id="run-check">Запустить проверку сейчас</button></div>
       <div id="check-summary" class="check-summary">Ожидание первой проверки</div><div id="check-list" class="check-list"></div>
       <article class="panel-card">
-        <div class="panel-head"><div><h3>Рыночный поток · прототип</h3><p>Наблюдение за разрешёнными WebSocket-событиями. Торговые команды не отправляются.</p></div><span class="pill" id="market-stream-state">Нет данных</span></div>
+        <div class="panel-head"><div><h3>Планировщик анализа</h3><p>Автоматически проверяет доступные OTC-пары и новые закрытые свечи. Кандидаты не превращаются в сделки.</p></div><button class="btn secondary" id="refresh-scheduler">Обновить</button></div>
+        <div id="scheduler-summary" class="check-summary">Планировщик ещё не загружен</div>
+        <div id="scheduler-decisions" class="check-list"><div class="empty">Нет решений</div></div>
+      </article>
+      <article class="panel-card" style="margin-top:14px">
+        <div class="panel-head"><div><h3>Торговый журнал и статистика</h3><p>Отображаются только сделки, подтверждённые торговым контуром и сохранённые в DEMO-журнале. Реальное исполнение отключено.</p></div><button class="btn secondary" id="refresh-trades">Обновить</button></div>
+        <div id="trade-summary" class="check-summary">Журнал ещё не загружен</div>
+        <div id="trade-breakdown" class="check-list"><div class="empty">Пока нет закрытых сделок</div></div>
+        <div class="form-actions"><button class="btn secondary" id="toggle-trading-pause">Поставить шлюз на паузу</button><span id="trading-gate-state" class="muted">Шлюз остановлен</span></div>
+      </article>
+      <article class="panel-card">
+        <div class="panel-head"><div><h3>Рыночный поток Pocket Option</h3><p>Наблюдение за разрешёнными WebSocket-событиями. Торговые команды не отправляются.</p></div><span class="pill" id="market-stream-state">Нет данных</span></div>
         <div id="market-data-summary" class="check-summary">Ожидание рыночных событий</div>
         <div id="market-assets" class="check-list"><div class="empty">Поток ещё не получен</div></div>
+        <div class="form-actions"><button class="btn secondary" id="refresh-market-diagnostics">Проверить OTC-пары</button><span id="market-diagnostic-summary" class="muted">Ожидание диагностики</span></div>
+        <div id="market-diagnostic-assets" class="check-list"><div class="empty">Диагностика ещё не запускалась</div></div>
       </article>
     </section>
     <section class="page" id="page-logs">
@@ -75,5 +142,5 @@
     <footer>POCKET OPTION BACKGROUND <span>Локальная сессия · Без автозапуска Windows</span></footer>
   </main>
 </div>
-<div id="toast" class="toast"></div><script src="app.js"></script>
+<div id="toast" class="toast"></div><script src="app.js"></script><script src="workbench.js"></script>
 </body></html>
