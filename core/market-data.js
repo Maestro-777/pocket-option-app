@@ -282,11 +282,11 @@ class MarketDataService {
     if (eventName === 'updateAssets') return this.ingestAssets(payload);
     const event = parseMarketEvent(eventName, payload, receivedAt);
     if (!event) return { accepted: false, reason: 'unsupported-or-invalid-payload' };
-    this.store.eventCount++;
-    this.store.lastEventAt = receivedAt;
-    this.store.lastEventName = eventName;
     if (event.kind === 'history') {
       // Historical OHLC is kept in the candle store, not counted as live ticks.
+      this.store.eventCount++;
+      this.store.lastEventAt = receivedAt;
+      this.store.lastEventName = eventName;
       for (const candle of event.candles || []) this.store._ingestCandle(candle);
       return { accepted: true, kind: 'history', count: (event.candles || []).length };
     }
