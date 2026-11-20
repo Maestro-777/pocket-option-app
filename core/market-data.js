@@ -253,4 +253,101 @@ class MarketDataStore {
   }
 }
 
-module.exports = { SUPPORTED_EVENTS, normalizeAssetName, normalizeTimestamp, normalizeTick, normalizeHistoryRows, parseMarketEvent, MarketDataStore };
+function normalizeAsset(raw) {
+  const value = normalizeAssetName(raw);
+  return value || null;
+}
+
+// Compatibility facade for the analytics modules. It delegates parsing and
+// bounded in-memory buffering to the application's existing MarketDataStore.
+class MarketDataService {
+  constructor(options = {}) {
+    this.store = new MarketDataStore(options);
+    this.connected = false;
+  }
+  ingestAssets(payload) {
+    const result = this.store.ingest('updateAssets', payload);
+    return result.accepted ? result.count : 0;
+  }
+  ingestTicks(rows) {
+    if (!Array.isArray(rows)) throw new TypeError('ticks должен быть массивом');
+    const normalized = rows.map(row => {
+      if (Array.isArray(row)) return [row[0], row[1], row[2]];
+      return [row && (row.asset || row.symbol), row && (row.ts || row.time), row && row.price];
+    }).filter(row => row[0] != null);
+    const result = this.store.ingest('updateStream', normalized);
+    return result.accepted ? result.count : 0;
+  }
+  ingestEvent(eventName, payload, receivedAt = Date.now()) {
+    return this.store.ingest(eventName, payload, receivedAt);
+  }
+  ingest(tick) {
+    const count = this.ingestTicks([[tick.asset, tick.ts, tick.price]]);
+    return { accepted: count > 0, count };
+  }
+  listAssets(options = {}) {
+    const rows = new Map();
+    for (const item of this.store.catalog.values()) {
+      rows.set(item.asset, { symbol: item.asset, rawSymbol: item.raw, label: item.label, otc: item.isOtc });
+    }
+    for (const item of this.store.getSnapshot().assets) {
+      if (!rows.has(item.asset)) rows.set(item.asset, { symbol: item.asset, rawSymbol: item.asset, label: item.asset, otc: item.isOtc });
+    }
+    return Array.from(rows.values()).filter(item => options.otcOnly !== true || item.otc)
+      .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  }
+  getCandles(asset, timeframe, options = {}) {
+    const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500));
+    return this.store.getAggregatedCandles(asset, timeframe, {
+      asOf: options.asOf == null ? Date.now() : Number(options.asOf),
+      includeIncomplete: options.includeIncomplete === true
+    }).filter(candle => options.includeIncomplete === true || candle.complete).slice(-limit);
+  }
+  getLatestDataTime(asset, timeframe) {
+    const rows = this.getCandles(asset, timeframe, { limit: 2000 });
+    return rows.length ? rows[rows.length - 1].endAt : null;
+  }
+  getStatus() {
+    const snapshot = this.store.getSnapshot();
+    let historyCandleCount = 0;
+    for (const state of this.store.assets.values()) for (const candles of state.candles.values()) historyCandleCount += candles.size;
+    return { connected: this.connected, tickCount: snapshot.acceptedTickCount, assetCount: snapshot.assetCount,
+      historyCandleCount, catalogAssetCount: snapshot.catalogAssetCount, lastTickAt: snapshot.lastTickAt };
+  }
+  exportSnapshot() {
+    const ticks = [], history = [];
+    for (const [asset, state] of this.store.assets) {
+      for (const tick of state.ticks) ticks.push({ asset, ts: tick.ts, price: tick.price });
+      for (const candles of state.candles.values()) for (const candle of candles.values()) history.push({ ...candle });
+    }
+    return { schemaVersion: 1, savedAt: new Date().toISOString(), connected: false,
+      catalog: Array.from(this.store.catalog.values()).map(item => ({ ...item })), ticks, history };
+  }
+  restoreSnapshot(snapshot) {
+    if (!snapshot || snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.ticks) ||
+        !Array.isArray(snapshot.history) || !Array.isArray(snapshot.catalog)) {
+      throw new TypeError('Некорректный снимок рыночных данных');
+    }
+    const next = new MarketDataStore();
+    for (const item of snapshot.catalog) {
+      if (!item || typeof item.asset !== 'string') throw new TypeError('Некорректный каталог в снимке');
+      next.catalog.set(item.asset, { ...item });
+    }
+    for (const tick of snapshot.ticks) {
+      const normalized = normalizeTick(tick.asset, tick.ts, tick.price, Date.now());
+      if (!normalized) throw new TypeError('Некорректный тик в снимке');
+      next._ingestTick(normalized);
+    }
+    for (const candle of snapshot.history) {
+      if (!candle || !Number.isFinite(Number(candle.startAt)) || !Number.isFinite(Number(candle.endAt))) {
+        throw new TypeError('Некорректная свеча в снимке');
+      }
+      next._ingestCandle({ ...candle });
+    }
+    this.store = next;
+    this.connected = false;
+    return this.getStatus();
+  }
+}
+
+module.exports = { SUPPORTED_EVENTS, normalizeAssetName, normalizeAsset, normalizeTimestamp, normalizeTick, normalizeHistoryRows, parseMarketEvent, MarketDataStore, MarketDataService };
