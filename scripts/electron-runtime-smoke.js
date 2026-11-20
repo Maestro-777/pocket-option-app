@@ -1,6 +1,8 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
 const { app, BrowserWindow, ipcMain } = require('electron');
 const { MarketDataStore } = require('../core/market-data-store');
 
@@ -8,6 +10,10 @@ app.disableHardwareAcceleration();
 
 app.whenReady().then(async () => {
   let window;
+  let siteWindow;
+  let fixturePath;
+  const receivedBalances = [];
+  const onSiteBalance = (_event, payload) => receivedBalances.push(payload);
   try {
     const store = new MarketDataStore(':memory:');
     if (!store.integrityCheck() || store.getStats().schemaVersion !== 5) throw new Error('SQLite schema v5 did not initialize correctly');
@@ -46,11 +52,15 @@ app.whenReady().then(async () => {
     await window.webContents.executeJavaScript('window.pocketApp.getMarketAssets()');
     await window.webContents.executeJavaScript('Promise.all([window.pocketApp.getTradeResults(), window.pocketApp.getTradeStatistics()])');
     window.destroy();
+    window = null;
 
-    const receivedBalances = [];
-    const onSiteBalance = (_event, payload) => receivedBalances.push(payload);
+    // Electron's sandboxed renderer does not consistently navigate to data: URLs
+    // in Windows CI. Use a real local file so the isolated preload is exercised
+    // under the same file:// origin policy as the packaged application.
+    fixturePath = path.join(os.tmpdir(), 'pocket-option-preload-fixture-' + process.pid + '.html');
+    fs.writeFileSync(fixturePath, '<!doctype html><html><body><span class="js-balance-real-USD">123.45</span></body></html>', 'utf8');
     ipcMain.on('site:balance', onSiteBalance);
-    const siteWindow = new BrowserWindow({
+    siteWindow = new BrowserWindow({
       show: false,
       webPreferences: {
         preload: path.join(__dirname, '..', 'site-preload.js'),
@@ -59,9 +69,8 @@ app.whenReady().then(async () => {
         sandbox: true
       }
     });
-    const fixture = '<html><body><span class="js-balance-real-USD">123.45</span></body></html>';
-    await siteWindow.loadURL('data:text/html,' + encodeURIComponent(fixture));
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await siteWindow.loadFile(fixturePath);
+    await new Promise(resolve => setTimeout(resolve, 200));
     if (receivedBalances.length !== 1 || receivedBalances[0]?.accountType !== 'real' ||
         receivedBalances[0]?.balance !== 123.45) {
       throw new Error('Isolated site preload did not read and normalize the balance fixture');
@@ -69,19 +78,23 @@ app.whenReady().then(async () => {
     await siteWindow.webContents.executeJavaScript(
       "window.postMessage({type:'PT_PO_BALANCE',accountType:'real',balance:999999,ts:Date.now()}, '*')"
     );
-    await new Promise(resolve => setTimeout(resolve, 150));
+    await new Promise(resolve => setTimeout(resolve, 200));
     if (receivedBalances.length !== 1 || receivedBalances[0].balance !== 123.45) {
       throw new Error('Page postMessage must not be able to forge privileged balance IPC');
     }
-    ipcMain.removeListener('site:balance', onSiteBalance);
-    siteWindow.destroy();
 
     console.log('Electron SQLite, labeling renderer, and isolated site-preload security smoke tests passed');
     app.exit(0);
   } catch (error) {
-    try { if (window && !window.isDestroyed()) window.destroy(); } catch (_) {}
     console.error('Electron runtime smoke test failed:', error);
     app.exit(1);
+  } finally {
+    ipcMain.removeListener('site:balance', onSiteBalance);
+    try { if (window && !window.isDestroyed()) window.destroy(); } catch (_) {}
+    try { if (siteWindow && !siteWindow.isDestroyed()) siteWindow.destroy(); } catch (_) {}
+    if (fixturePath) {
+      try { fs.rmSync(fixturePath, { force: true }); } catch (_) {}
+    }
   }
 }).catch(error => {
   console.error('Electron startup failed:', error);
