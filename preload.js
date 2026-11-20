@@ -4,6 +4,7 @@ const api = {
   getStatus: () => ipcRenderer.invoke('app:get-status'),
   getAnalysisAssets: () => ipcRenderer.invoke('analysis:get-assets'),
   getAnalysisCandles: request => ipcRenderer.invoke('analysis:get-candles', request),
+  requestAnalysisHistory: request => ipcRenderer.invoke('analysis:request-history', request),
   listExamples: filters => ipcRenderer.invoke('examples:list', filters),
   addExample: input => ipcRenderer.invoke('examples:add', input),
   updateExample: request => ipcRenderer.invoke('examples:update', request),
