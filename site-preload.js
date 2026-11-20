@@ -63,6 +63,9 @@ function installMarketWebSocketTap() {
       const eventName = parsed[0];
       const payload = parsed[1];
       if (!allowed.has(eventName)) return;
+      // Prefer the socket that actually carries Pocket Option market events;
+      // the page may keep analytics/auth sockets open alongside the market socket.
+      window.__PT_ACTIVE_MARKET_SOCKET__ = socket;
       if (payload && payload._placeholder === true) {
         const list = pending.get(socket) || [];
         list.push(eventName);
@@ -104,7 +107,8 @@ function installMarketWebSocketTap() {
     const period = Number(data && data.period);
     if (!asset || !asset.endsWith('_OTC') || !Number.isInteger(period) || period < 5 || period > 900) return false;
     const sockets = window.__PT_ACTIVE_MARKET_SOCKETS__ || [];
-    const ws = sockets.slice().reverse().find(item => item && item.readyState === 1);
+    const preferred = window.__PT_ACTIVE_MARKET_SOCKET__;
+    const ws = preferred && preferred.readyState === 1 ? preferred : sockets.slice().reverse().find(item => item && item.readyState === 1);
     if (!ws) return false;
     const raw = rawAssets.get(asset) || asset.replace(/_OTC$/, '_otc');
     const now = Math.floor(Date.now() / 1000);
@@ -140,6 +144,11 @@ function installMarketWebSocketTap() {
   window.WebSocket = MarketTapWebSocket;
   return 'installed';
 }
+
+window.addEventListener('message', event => {
+  if (event.source !== window || event.origin !== location.origin || !event.data || event.data.type !== 'PT_HISTORY_REQUEST_RESULT') return;
+  ipcRenderer.send('site:log', { message: 'History request bridge: ' + (event.data.ok ? 'sent to market socket' : 'no active market socket') + '; request=' + String(event.data.requestId || ''), level: event.data.ok ? 'info' : 'error' });
+});
 
 ipcRenderer.on('site:request-history', (_event, request) => {
   if (!request || typeof request.asset !== 'string') return;
