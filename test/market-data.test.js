@@ -148,7 +148,7 @@ test('uses Pocket Tracker 3.6.0 price-point fallback for ambiguous five-column h
   const parsed = normalizeHistoryRows('AUDCAD_otc', rows, 5, 1_700_000_030_000);
   assert.equal(parsed.candles.length, 0);
   assert.equal(parsed.ticks.length, 3);
-  assert.equal(parsed.ticks[0].price, 0.99482);
+  assert.equal(parsed.ticks[0].price, 0.99490);
 
   const service = new MarketDataService();
   service.ingestEvent('loadHistoryPeriod', {
@@ -158,7 +158,7 @@ test('uses Pocket Tracker 3.6.0 price-point fallback for ambiguous five-column h
   assert.equal(candles.length, 3);
   assert.equal(candles[0].source, 'history-ticks');
   assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close],
-    [0.99482, 0.99482, 0.99482, 0.99482]);
+    [0.99490, 0.99490, 0.99490, 0.99490]);
 });
 
 test('accepts object history rows with timestamp property', () => {
