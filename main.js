@@ -354,8 +354,7 @@ ipcMain.handle('analysis:get-candles', (event, request = {}) => {
   const limit = Math.max(2, Math.min(2000, Number(request.limit) || 300));
   getTimeframeDuration(timeframe);
   if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
-  return marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit: 2000 })
-    .filter(candle => candle.complete).slice(-limit);
+  return marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit, includeIncomplete: true }).slice(-limit);
 });
 ipcMain.handle('examples:list', async (event, filters = {}) => {
   requireTrustedMainRenderer(event);
@@ -762,8 +761,9 @@ if (!lock) {
   exampleStore = new ExampleStore(path.join(dataDirectory, 'examples.json'));
   decisionJournal = new DecisionJournal(path.join(dataDirectory, 'decision-journal.jsonl'));
   marketDataPersistence = new MarketDataPersistence(marketDataStore, path.join(dataDirectory, 'market-data.snapshot.json'));
-  const restoredMarket = await marketDataPersistence.load();
-  if (restoredMarket) log('info', 'История котировок восстановлена', restoredMarket);
+  const marketSnapshotPath = path.join(dataDirectory, 'market-data.snapshot.json');
+  try { fs.rmSync(marketSnapshotPath, { force: true }); log('info', 'Старый архив котировок удалён; используется только живой поток'); }
+  catch (error) { log('error', 'Не удалось удалить старый архив котировок', String(error)); }
   scanStateStore = new ScanStateStore(path.join(dataDirectory, 'scan-state.json'));
   tradeLedger = new TradeLedger(path.join(dataDirectory, 'trade-ledger.json'));
   await tradeLedger.load();
