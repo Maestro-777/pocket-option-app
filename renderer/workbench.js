@@ -61,7 +61,7 @@
   }
   function renderSelection() {
     $('wb-start').textContent=selectionText('start'); $('wb-entry').textContent=selectionText('entry'); $('wb-end').textContent=selection.end==null||!candles[selection.end]?'—':stamp(candles[selection.end].endAt);
-    if(!candles.length){$('wb-candles').innerHTML='<div class="empty">Нет закрытых свечей для отображения</div>';return;}
+    if(!candles.length){$('wb-candles').innerHTML='<div class="empty">Ожидание живых тиков Pocket Option</div>';return;}
     const displayCandles=toHeikinAshi(candles);
     const width=Math.max(520,($('wb-candles').clientWidth||960)-24),height=390,left=66,right=104,top=20,bottom=42;
     const plotW=width-left-right,plotH=height-top-bottom,step=plotW/displayCandles.length;
