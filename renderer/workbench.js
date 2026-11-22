@@ -3,11 +3,42 @@
   const api = window.pocketApp;
   const $ = id => document.getElementById(id);
   const timeframes = ['S5','S10','S15','S30','M1','M2','M3','M5','M10','M15'];
-  let candles = [], examples = [], mode = 'start', selection = { start: null, entry: null, end: null }, editingId = null;
+  let candles = [], examples = [], mode = 'start', selection = { start: null, entry: null, end: null }, editingId = null, currentQuote = null, activeCandleIndex = null, quoteTimer = null;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const stamp = value => new Date(value).toLocaleString('ru-RU');
   function say(value) { $('wb-status').textContent = value; }
   function selectionText(key) { const i=selection[key]; return i==null || !candles[i] ? '—' : stamp(candles[i].startAt); }
+  function priceText(value) {
+    const n=Number(value);
+    return Number.isFinite(n) ? n.toLocaleString('ru-RU',{minimumFractionDigits:5,maximumFractionDigits:8}) : '—';
+  }
+  function quoteAgeText(ts) {
+    if(!Number.isFinite(Number(ts)))return 'нет отметки времени';
+    const age=Math.max(0,Date.now()-Number(ts));
+    return age<1000?'только что':age<60000?Math.floor(age/1000)+' с назад':Math.floor(age/60000)+' мин назад';
+  }
+  async function refreshCurrentQuote() {
+    const asset=$('wb-asset').value;
+    if(!asset)return;
+    try {
+      const rows=await api.getAnalysisAssets();
+      const found=rows.find(x=>x.asset===asset);
+      currentQuote=found&&Number.isFinite(Number(found.lastPrice))?{price:Number(found.lastPrice),ts:Number(found.lastTickAt),ageMs:found.ageMs}:null;
+      const summary=$('wb-market-summary');
+      if(summary) {
+        if(currentQuote) {
+          const stale=Date.now()-currentQuote.ts>15000;
+          const last=candles[candles.length-1];
+          const delta=last?currentQuote.price-Number(last.close):null;
+          const pct=last&&Number(last.close)!==0?delta/Number(last.close)*100:null;
+          summary.innerHTML='<div class="wb-quote-main"><div><span class="wb-kicker">ТЕКУЩАЯ ЦЕНА · '+esc(asset)+'</span><strong>'+priceText(currentQuote.price)+'</strong><small class="'+(stale?'wb-stale':'wb-fresh')+'">'+(stale?'УСТАРЕВШИЙ ТИК':'ЖИВОЙ ПОТОК')+' · '+esc(quoteAgeText(currentQuote.ts))+'</small></div><div class="wb-quote-delta"><span>К последнему закрытию</span><b class="'+(delta==null?'':delta>=0?'wb-fresh':'wb-stale')+'">'+(delta==null?'—':(delta>0?'+':'')+priceText(delta))+'</b><small>'+(pct==null?'—':(pct>0?'+':'')+pct.toFixed(4)+'%')+'</small></div></div><small class="wb-source-note">Источник: последний тик, принятый из рыночного потока Pocket Option. Это не отдельный запрос котировки с сайта.</small>';
+        } else {
+          summary.innerHTML='<div class="wb-quote-main"><div><span class="wb-kicker">ТЕКУЩАЯ ЦЕНА · '+esc(asset)+'</span><strong>Нет данных</strong><small class="wb-stale">В потоке пока нет цены для этой пары</small></div></div>';
+        }
+      }
+      if(candles.length)renderSelection();
+    } catch(error) { console.warn('[Pocket Tracker] Не удалось обновить текущую цену',error); }
+  }
   // Heikin Ashi is a display-only transform. Keep provider OHLC untouched in
   // candles so saved examples and the decision engine always use source data.
   function toHeikinAshi(source) {
@@ -32,27 +63,40 @@
     $('wb-start').textContent=selectionText('start'); $('wb-entry').textContent=selectionText('entry'); $('wb-end').textContent=selection.end==null||!candles[selection.end]?'—':stamp(candles[selection.end].endAt);
     if(!candles.length){$('wb-candles').innerHTML='<div class="empty">Нет закрытых свечей для отображения</div>';return;}
     const displayCandles=toHeikinAshi(candles);
-    const width=Math.max(320,($('wb-candles').clientWidth||960)-2),height=310,pad=12;
-    const step=(width-pad*2)/displayCandles.length;
-    const bodyWidth=Math.max(2,Math.min(9,step*0.62));
-    const lows=displayCandles.map(x=>Number(x.low)),highs=displayCandles.map(x=>Number(x.high));
-    const min=Math.min(...lows),max=Math.max(...highs),range=max-min||1;
-    const y=value=>height-pad-(Number(value)-min)/range*(height-pad*2);
+    const width=Math.max(520,($('wb-candles').clientWidth||960)-24),height=390,left=66,right=104,top=20,bottom=42;
+    const plotW=width-left-right,plotH=height-top-bottom,step=plotW/displayCandles.length;
+    const bodyWidth=Math.max(1,Math.min(10,step*0.62));
+    const values=displayCandles.flatMap(x=>[Number(x.low),Number(x.high)]);
+    if(currentQuote&&Number.isFinite(currentQuote.price))values.push(currentQuote.price);
+    const min=Math.min(...values),max=Math.max(...values),rawRange=max-min||1,range=rawRange*1.12;
+    const low=min-rawRange*.06,high=max+rawRange*.06;
+    const y=value=>top+plotH-(Number(value)-low)/(high-low)*plotH;
+    const xAt=i=>left+(i+.5)*step;
     const markers={start:'#60a5fa',entry:'#facc15',end:'#c084fc'};
+    const grid=Array.from({length:5},(_,i)=>{
+      const value=low+(high-low)*i/4,yy=y(value);
+      return '<line x1="'+left+'" x2="'+(width-right)+'" y1="'+yy+'" y2="'+yy+'" stroke="#64748b" stroke-opacity=".24" stroke-dasharray="3 4"/><text x="'+(left-8)+'" y="'+(yy+4)+'" text-anchor="end" fill="#91a3bd" font-size="10">'+esc(priceText(value))+'</text>';
+    }).join('');
     const bars=displayCandles.map((bar,i)=>{
-      const x=pad+(i+0.5)*step,open=y(bar.open),close=y(bar.close),top=Math.min(open,close),body=Math.max(1,Math.abs(close-open));
+      const x=xAt(i),open=y(bar.open),close=y(bar.close),topBody=Math.min(open,close),body=Math.max(1,Math.abs(close-open));
       const selected=Object.keys(selection).filter(k=>selection[k]===i);
       const fill=selected.length?markers[selected[0]]:(bar.close>=bar.open?'#22c55e':'#ef4444');
-      const marker=selected.length?'<text x="'+x+'" y="10" text-anchor="middle" fill="'+fill+'" font-size="9">'+selected.map(k=>k[0].toUpperCase()).join('/')+'</text>':'';
-      return '<g data-wb-index="'+i+'" style="cursor:pointer">'+marker+'<line x1="'+x+'" x2="'+x+'" y1="'+y(bar.high)+'" y2="'+y(bar.low)+'" stroke="'+fill+'" stroke-width="1"/><rect x="'+(x-1.5)+'" y="'+top+'" width="3" height="'+body+'" fill="'+fill+'"><title>'+esc(stamp(bar.startAt))+' O '+bar.open+' H '+bar.high+' L '+bar.low+' C '+bar.close+'</title></rect></g>';
+      const marker=selected.length?'<text x="'+x+'" y="'+(top+9)+'" text-anchor="middle" fill="'+fill+'" font-size="9">'+selected.map(k=>k[0].toUpperCase()).join('/')+'</text>':'';
+      return '<g data-wb-index="'+i+'" style="cursor:pointer"><title>'+esc(stamp(candles[i].startAt))+' · HA O '+priceText(bar.open)+' H '+priceText(bar.high)+' L '+priceText(bar.low)+' C '+priceText(bar.close)+' · источник O '+priceText(candles[i].open)+' H '+priceText(candles[i].high)+' L '+priceText(candles[i].low)+' C '+priceText(candles[i].close)+'</title>'+marker+'<line x1="'+x+'" x2="'+x+'" y1="'+y(bar.high)+'" y2="'+y(bar.low)+'" stroke="'+fill+'" stroke-width="1.2"/><rect x="'+(x-bodyWidth/2)+'" y="'+topBody+'" width="'+bodyWidth+'" height="'+body+'" rx=".6" fill="'+fill+'"/></g>';
     }).join('');
-    $('wb-candles').innerHTML='<div style="width:100%;overflow:hidden"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+width+' '+height+'" width="100%" height="'+height+'" role="img" aria-label="График Heikin Ashi; нажми на свечу для отметки"><line x1="0" x2="'+width+'" y1="'+(height/2)+'" y2="'+(height/2)+'" stroke="#64748b" stroke-opacity=".25"/>'+bars+'</svg></div><small>Нажми на свечу, чтобы поставить текущую отметку. Синий — начало, жёлтый — вход, фиолетовый — конец.</small>';
+    const labels=[0,Math.floor((candles.length-1)/2),candles.length-1].filter((v,i,a)=>a.indexOf(v)===i).map(i=>'<text x="'+xAt(i)+'" y="'+(height-12)+'" text-anchor="middle" fill="#91a3bd" font-size="10">'+esc(new Date(candles[i].startAt).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}))+'</text>').join('');
+    const quoteLine=currentQuote&&Number.isFinite(currentQuote.price)?'<line x1="'+left+'" x2="'+(width-right)+'" y1="'+y(currentQuote.price)+'" y2="'+y(currentQuote.price)+'" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4"/><rect x="'+(width-right+5)+'" y="'+(y(currentQuote.price)-10)+'" width="'+(right-9)+'" height="20" rx="4" fill="#854d0e"/><text x="'+(width-right+10)+'" y="'+(y(currentQuote.price)+4)+'" fill="#fff7d6" font-size="10">'+esc(priceText(currentQuote.price))+'</text>':'';
+    const svg='<div class="wb-chart-scroll"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+width+' '+height+'" width="'+width+'" height="'+height+'" role="img" aria-label="График Heikin Ashi с линией текущей цены">'+grid+'<line x1="'+left+'" x2="'+left+'" y1="'+top+'" y2="'+(height-bottom)+'" stroke="#64748b" stroke-opacity=".4"/>'+bars+quoteLine+labels+'</svg></div>';
+    const idx=activeCandleIndex!=null&&candles[activeCandleIndex]?activeCandleIndex:candles.length-1;
+    const raw=candles[idx],ha=displayCandles[idx];
+    const details='<div class="wb-candle-details"><div class="wb-detail-heading"><b>Свеча '+(idx+1)+' / '+candles.length+'</b><span>'+esc(stamp(raw.startAt))+' — '+esc(stamp(raw.endAt))+'</span></div><div class="wb-detail-grid"><div><small>Источник · OHLC</small><b>O '+priceText(raw.open)+'</b><b>H '+priceText(raw.high)+'</b><b>L '+priceText(raw.low)+'</b><b>C '+priceText(raw.close)+'</b></div><div><small>Heikin Ashi · OHLC</small><b>O '+priceText(ha.open)+'</b><b>H '+priceText(ha.high)+'</b><b>L '+priceText(ha.low)+'</b><b>C '+priceText(ha.close)+'</b></div><div><small>Изменение свечи</small><b class="'+(raw.close>=raw.open?'wb-fresh':'wb-stale')+'">'+(raw.close>=raw.open?'+':'')+priceText(raw.close-raw.open)+'</b><b>'+(raw.open?((raw.close-raw.open)/raw.open*100).toFixed(4)+'%':'—')+'</b><small>Размах: '+priceText(raw.high-raw.low)+'</small></div></div></div>';
+    $('wb-candles').innerHTML=svg+details+'<small class="wb-chart-hint">Свечи отображаются в Heikin Ashi. Жёлтая пунктирная линия — текущая цена из живого тика; значения исходного OHLC и Heikin Ashi показаны отдельно. Нажми на свечу для просмотра её параметров и отметки.</small>';
   }
   async function loadAssets() {
     const rows=await api.getAnalysisAssets(),select=$('wb-asset'),previous=select.value;
     select.innerHTML='<option value="">Выбери OTC-пару</option>'+rows.map(x=>'<option value="'+esc(x.asset)+'">'+esc(x.asset)+'</option>').join('');
     if(rows.some(x=>x.asset===previous))select.value=previous;
-    say('В потоке обнаружено OTC-пар: '+rows.length+'.');
+    say('В потоке обнаружено OTC-пар: '+rows.length+'.');\n    await refreshCurrentQuote();
   }
   async function loadCandles() {
     const asset=$('wb-asset').value, timeframe=$('wb-timeframe').value, limit=Number($('wb-limit').value);
@@ -70,7 +114,7 @@
     candles=await api.getAnalysisCandles({asset,timeframe,limit});
     if(!candles.length)throw new Error('Pocket Option подтвердил историю, но в хранилище нет закрытых OHLC-свечей.');
 
-    selection={start:null,entry:null,end:null};renderSelection();
+    selection={start:null,entry:null,end:null};activeCandleIndex=candles.length-1;renderSelection();
     const first=candles[0],last=candles[candles.length-1];
     const events=diagnostics.historyEvents||[];
     const eventSummary=events.slice(-3).map(x=>x.eventName+': '+x.acceptedCandles+'/'+x.inputRows+' OHLC, layout '+(x.detectedLayout||'не определён')+', отброшено '+x.rejectedRows).join(' | ');
@@ -138,7 +182,7 @@
       (d.matches.map(m=>'<div class="log-entry"><b>'+esc(m.sourcePair)+'</b><span>'+esc(m.direction)+'</span><span>'+Number(m.similarity).toFixed(2)+'%</span><span>'+esc(m.outcome)+'</span></div>').join('')||'<div class="empty">Совпадений нет</div>');
   }
   document.querySelectorAll('[data-wb-mode]').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.wbMode;say('Режим отметки: '+({start:'начало',entry:'точка входа',end:'конец'}[mode]));}));
-  $('wb-candles').addEventListener('click',e=>{const b=e.target.closest('[data-wb-index]');if(!b)return;const i=Number(b.dataset.wbIndex);if(!Number.isInteger(i)||!candles[i])return;selection[mode]=i;renderSelection();});
+  $('wb-candles').addEventListener('click',e=>{const b=e.target.closest('[data-wb-index]');if(!b)return;const i=Number(b.dataset.wbIndex);if(!Number.isInteger(i)||!candles[i])return;selection[mode]=i;activeCandleIndex=i;renderSelection();});
   $('wb-load').addEventListener('click',()=>loadCandles().catch(e=>say(e.message)));
   $('wb-clear').addEventListener('click',()=>{selection={start:null,entry:null,end:null};renderSelection();});
   $('wb-save').addEventListener('click',()=>saveExample().catch(e=>$('wb-save-status').textContent=e.message));
