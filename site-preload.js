@@ -101,7 +101,6 @@ function installMarketWebSocketTap() {
       const eventName = parsed[0];
       const payload = parsed[1];
       if (!allowed.has(eventName)) return;
-      const correlatedPayload = correlateHistory(eventName, payload, socket);
       // Prefer the socket that actually carries Pocket Option market events;
       // the page may keep analytics/auth sockets open alongside the market socket.
       window.__PT_ACTIVE_MARKET_SOCKET__ = socket;
@@ -111,7 +110,7 @@ function installMarketWebSocketTap() {
         pending.set(socket, list);
         return;
       }
-      publish(eventName, correlatedPayload);
+      publish(eventName, correlateHistory(eventName, payload, socket));
       return;
     }
 
