@@ -81,10 +81,12 @@ function normalizeHistoryRows(assetRaw, rows, periodRaw, receivedAt) {
       // A five-column provider row is a candle, not a tick. If its OHLC
       // layout cannot be validated, reject it rather than inventing a close
       // and later rebuilding a different candle from sparse ticks.
-      if (priceRaw == null && row.length >= 5) { rejectedRows++; continue; }
-      if (priceRaw == null) priceRaw = row[1];
+      // Match Pocket Tracker 3.6.0: if a 5-column row cannot be
+      // confidently identified as OHLC, treat its third column as a
+      // historical price point. Never relabel it as a provider candle.
+      if (priceRaw == null) priceRaw = row.length >= 5 ? row[2] : row[1];
     } else if (typeof row === 'object') {
-      timestampRaw = row.time ?? row.t ?? row.ts;
+      timestampRaw = row.time ?? row.t ?? row.ts ?? row.timestamp;
       priceRaw = row.close ?? row.c ?? row.price ?? row.p;
       const open = Number(row.open ?? row.o), high = Number(row.high ?? row.h);
       const low = Number(row.low ?? row.l), close = Number(row.close ?? row.c ?? priceRaw);
@@ -176,7 +178,7 @@ class MarketDataStore {
         const oldest = [...this.assets.entries()].sort((a, b) => (a[1].lastTickAt || 0) - (b[1].lastTickAt || 0))[0];
         if (oldest) this.assets.delete(oldest[0]);
       }
-      this.assets.set(asset, { ticks: [], seen: new Set(), candles: new Map(), lastTickAt: null, lastPrice: null });
+      this.assets.set(asset, { ticks: [], historyTicks: [], seen: new Set(), candles: new Map(), lastTickAt: null, lastPrice: null });
     }
     return this.assets.get(asset);
   }
@@ -297,6 +299,14 @@ class MarketDataService {
       this.store.eventCount++;
       this.store.lastEventAt = receivedAt;
       this.store.lastEventName = eventName;
+      const historyAsset = normalizeAssetName(data?.asset || data?.a || '');
+      if (historyAsset) {
+        const state = this.store._assetState(historyAsset);
+        for (const tick of event.ticks || []) state.historyTicks.push({ ...tick });
+        if (state.historyTicks.length > this.store.maxTicksPerAsset) {
+          state.historyTicks.splice(0, state.historyTicks.length - this.store.maxTicksPerAsset);
+        }
+      }
       for (const candle of event.candles || []) this.store._ingestCandle(candle);
       const data = Array.isArray(payload) && payload.length === 1 && payload[0] && typeof payload[0] === 'object' ? payload[0] : payload;
       this.store.historyDiagnostics.push({ eventName, asset: normalizeAssetName(data?.asset || data?.a || ''), receivedAt, ...event.diagnostics });
@@ -324,13 +334,21 @@ class MarketDataService {
     const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500));
     const asOf = options.asOf == null ? Date.now() : Number(options.asOf);
     const duration = require('./timeframes').getTimeframeDuration(timeframe);
-    const historical = this.store.getCandles(asset, duration / 1000, 2000)
+    const state = this.store.assets.get(normalizeAssetName(asset));
+    const providerCandles = this.store.getCandles(asset, duration / 1000, 2000)
       .filter(candle => candle.endAt <= asOf && (options.includeIncomplete === true || candle.complete))
-      .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase() }));
-    // The workbench is a source-of-truth chart: show only provider OHLC
-    // candles. Tick aggregation is useful for diagnostics, but it is not
-    // interchangeable with Pocket Option's candle history.
-    return historical.sort((a, b) => a.startAt - b.startAt).slice(-limit);
+      .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase(), source: 'provider-ohlc' }));
+    // Pocket Tracker 3.6.0 falls back to historical price points when the
+    // payload has five columns but its OHLC layout cannot be established.
+    // Aggregate those real received prices into explicitly-labelled candles;
+    // provider OHLC always wins for a bucket when it exists.
+    const derivedCandles = state && state.historyTicks.length
+      ? aggregateTicksToCandles(state.historyTicks, timeframe, { asOf, includeIncomplete: options.includeIncomplete === true })
+          .map(candle => ({ ...candle, source: 'history-ticks' }))
+      : [];
+    const byStart = new Map(derivedCandles.map(candle => [candle.startAt, candle]));
+    for (const candle of providerCandles) byStart.set(candle.startAt, candle);
+    return [...byStart.values()].sort((a, b) => a.startAt - b.startAt).slice(-limit);
   }
   getLatestDataTime(asset, timeframe) {
     const rows = this.getCandles(asset, timeframe, { limit: 2000 });
@@ -356,12 +374,16 @@ class MarketDataService {
       for (const tick of state.ticks) ticks.push({ asset, ts: tick.ts, price: tick.price });
       for (const candles of state.candles.values()) for (const candle of candles.values()) history.push({ ...candle });
     }
-    return { schemaVersion: 1, savedAt: new Date().toISOString(), connected: false,
-      catalog: Array.from(this.store.catalog.values()).map(item => ({ ...item })), ticks, history };
+    const historyTicks = [];
+    for (const [asset, state] of this.store.assets) {
+      for (const tick of state.historyTicks || []) historyTicks.push({ asset, ts: tick.ts, price: tick.price });
+    }
+    return { schemaVersion: 2, savedAt: new Date().toISOString(), connected: false,
+      catalog: Array.from(this.store.catalog.values()).map(item => ({ ...item })), ticks, history, historyTicks };
   }
   restoreSnapshot(snapshot) {
-    if (!snapshot || snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.ticks) ||
-        !Array.isArray(snapshot.history) || !Array.isArray(snapshot.catalog)) {
+    if (!snapshot || ![1, 2].includes(snapshot.schemaVersion) || !Array.isArray(snapshot.ticks) ||
+        !Array.isArray(snapshot.history) || !Array.isArray(snapshot.catalog) || (snapshot.schemaVersion === 2 && !Array.isArray(snapshot.historyTicks))) {
       throw new TypeError('Некорректный снимок рыночных данных');
     }
     const next = new MarketDataStore();
@@ -373,6 +395,12 @@ class MarketDataService {
       const normalized = normalizeTick(tick.asset, tick.ts, tick.price, Date.now());
       if (!normalized) throw new TypeError('Некорректный тик в снимке');
       next._ingestTick(normalized);
+    }
+    for (const tick of snapshot.historyTicks || []) {
+      const normalized = normalizeTick(tick.asset, tick.ts, tick.price, Date.now());
+      if (!normalized) throw new TypeError('Некорректная историческая точка в снимке');
+      const state = next._assetState(normalized.asset);
+      state.historyTicks.push(normalized);
     }
     for (const candle of snapshot.history) {
       if (!candle || !Number.isFinite(Number(candle.startAt)) || !Number.isFinite(Number(candle.endAt))) {
