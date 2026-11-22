@@ -88,7 +88,15 @@ if errorlevel 1 (
 )
 
 echo.
-echo [5/5] Launching application...
+echo [5/6] Running regression tests...
+call npm test
+if errorlevel 1 (
+  echo [ERROR] Regression tests failed. Launch cancelled.
+  goto :failed
+)
+
+echo.
+echo [6/6] Launching application...
 call npm start
 set "APP_EXIT=%ERRORLEVEL%"
 
