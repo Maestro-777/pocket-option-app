@@ -303,18 +303,40 @@ ipcMain.handle('analysis:request-history', async (event, request = {}) => {
   }
   const period = Math.round(duration / 1000);
   const requestId = 'history-' + Date.now();
+  const requestStartedAt = Date.now();
   siteWindow.webContents.send('site:request-history', { asset, period, requestId });
-  log('info', 'Запрошена история свечей Pocket Option', { asset, timeframe, period });
-  const deadline = Date.now() + 15000;
+  log('info', 'Запрошена история свечей Pocket Option', { asset, timeframe, period, requestId });
+  const deadline = requestStartedAt + 15000;
   let candles = [];
+  let recentEvents = [];
   while (Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 250));
     if (!siteWindow || siteWindow.isDestroyed()) break;
     candles = marketDataStore.getCandles(asset, timeframe, { asOf: Date.now(), limit: 2000 })
       .filter(candle => candle.complete);
-    if (candles.length) return { ok: true, count: candles.length };
+    const diagnostics = marketDataStore.getDiagnostics(asset, timeframe);
+    recentEvents = (diagnostics.historyEvents || []).filter(item => Number(item.receivedAt) >= requestStartedAt);
+    const matchingEvents = recentEvents.filter(item => Number(item.periodSec) === period);
+    const freshOhlcCount = matchingEvents.reduce((sum, item) => sum + Math.max(0, Number(item.acceptedCandles) || 0), 0);
+    if (freshOhlcCount > 0 && candles.length) {
+      return { ok: true, count: candles.length, freshCandles: freshOhlcCount, historyEvents: matchingEvents.length };
+    }
   }
-  return { ok: false, count: candles.length, reason: 'Pocket Option не вернул историю. Проверь выбранную OTC-пару и соединение.' };
+  const matchingEvents = recentEvents.filter(item => Number(item.periodSec) === period);
+  const receivedRows = matchingEvents.reduce((sum, item) => sum + Math.max(0, Number(item.inputRows) || 0), 0);
+  const freshOhlcCount = matchingEvents.reduce((sum, item) => sum + Math.max(0, Number(item.acceptedCandles) || 0), 0);
+  const freshTickCount = matchingEvents.reduce((sum, item) => sum + Math.max(0, Number(item.tickRows) || 0), 0);
+  const rejectedRows = matchingEvents.reduce((sum, item) => sum + Math.max(0, Number(item.rejectedRows) || 0), 0);
+  const otherPeriods = [...new Set(recentEvents.map(item => Number(item.periodSec)).filter(Number.isFinite))];
+  let reason = 'После запроса не получено новое событие истории Pocket Option для ' + asset + ' ' + timeframe + '. Старые свечи не считаются подтверждением обновления.';
+  if (matchingEvents.length) {
+    reason = 'Pocket Option прислал ' + receivedRows + ' строк истории для ' + asset + ' ' + timeframe +
+      ', но распознано OHLC-свечей: ' + freshOhlcCount + ' (строк-тиков: ' + freshTickCount +
+      ', отклонено: ' + rejectedRows + '). Источник не подтвердил пригодную OHLC-историю.';
+  } else if (otherPeriods.length) {
+    reason += ' Получены события с periodSec=' + otherPeriods.join(', ') + ', ожидался ' + period + '.';
+  }
+  return { ok: false, count: 0, reason, historyEvents: recentEvents.length };
 });
 
 ipcMain.handle('analysis:get-diagnostics', (event, request = {}) => {
