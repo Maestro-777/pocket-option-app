@@ -19,6 +19,7 @@ function installMarketWebSocketTap() {
     'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2'
   ]);
   const pending = new WeakMap();
+  const pendingAttachments = new WeakMap();
   // Track history requests per socket. A response may inherit the requested
   // asset/period only when exactly one outstanding request can own it.
   const historyRequests = new WeakMap();
@@ -86,11 +87,51 @@ function installMarketWebSocketTap() {
     } catch (_) {}
   }
 
+  function countPlaceholders(value, depth = 0) {
+    if (depth > 12 || value == null) return 0;
+    if (Array.isArray(value)) return value.reduce((sum, item) => sum + countPlaceholders(item, depth + 1), 0);
+    if (typeof value === 'object') {
+      if (value._placeholder === true && Number.isInteger(Number(value.num))) return 1;
+      return Object.values(value).reduce((sum, item) => sum + countPlaceholders(item, depth + 1), 0);
+    }
+    return 0;
+  }
+  function replacePlaceholders(value, attachments, depth = 0) {
+    if (depth > 12 || value == null) return value;
+    if (Array.isArray(value)) return value.map(item => replacePlaceholders(item, attachments, depth + 1));
+    if (typeof value === 'object') {
+      if (value._placeholder === true) {
+        const index = Number(value.num);
+        return Number.isInteger(index) && index >= 0 && index < attachments.length ? attachments[index] : value;
+      }
+      const output = {};
+      for (const [key, item] of Object.entries(value)) output[key] = replacePlaceholders(item, attachments, depth + 1);
+      return output;
+    }
+    return value;
+  }
   function parsePacket(raw, socket) {
     let text;
+    const isBinary = typeof raw !== 'string';
     if (typeof raw === 'string') text = raw;
-    else if (raw instanceof ArrayBuffer) text = new TextDecoder('utf-8').decode(new Uint8Array(raw));
+    else if (raw instanceof ArrayBuffer) text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(raw));
+    else if (ArrayBuffer.isView(raw)) text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
     else return;
+
+    if (isBinary) {
+      const state = pendingAttachments.get(socket);
+      if (!state) return;
+      let attachment;
+      try { attachment = JSON.parse(text); } catch (_) { attachment = text; }
+      state.attachments.push(attachment);
+      if (state.attachments.length >= state.expected) {
+        pendingAttachments.delete(socket);
+        const packet = replacePlaceholders(state.packet, state.attachments);
+        const eventName = packet[0];
+        if (allowed.has(eventName)) publish(eventName, correlateHistory(eventName, packet[1], socket));
+      }
+      return;
+    }
 
     const start = text.search(/[\\[{]/);
     if (start < 0) return;
@@ -101,24 +142,17 @@ function installMarketWebSocketTap() {
       const eventName = parsed[0];
       const payload = parsed[1];
       if (!allowed.has(eventName)) return;
-      // Prefer the socket that actually carries Pocket Option market events;
-      // the page may keep analytics/auth sockets open alongside the market socket.
       window.__PT_ACTIVE_MARKET_SOCKET__ = socket;
-      if (payload && payload._placeholder === true) {
-        const list = pending.get(socket) || [];
-        list.push(eventName);
-        pending.set(socket, list);
+      const prefix = text.slice(0, start);
+      const attachmentMatch = prefix.match(/^45(\\d+)-/);
+      const attachmentCount = attachmentMatch ? Number(attachmentMatch[1]) : countPlaceholders(parsed);
+      if (attachmentCount > 0 || countPlaceholders(parsed) > 0) {
+        if (attachmentCount > 16) return;
+        pendingAttachments.set(socket, { packet: parsed, attachments: [], expected: Math.max(attachmentCount, countPlaceholders(parsed)) });
         return;
       }
       publish(eventName, correlateHistory(eventName, payload, socket));
       return;
-    }
-
-    const list = pending.get(socket) || [];
-    if (list.length) {
-      const eventName = list.shift();
-      pending.set(socket, list);
-      publish(eventName, correlateHistory(eventName, parsed, socket));
     }
   }
 
