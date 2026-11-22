@@ -82,6 +82,7 @@ test('does not guess when multiple pending history requests have no identifying 
     fn({ source: pageWindow, origin: 'https://pocketoption.com', data: { type: 'PT_REQUEST_HISTORY', ...request } });
   }
   ws.emit('42["loadHistoryPeriod",{"history":[[1700000000,0.9948,0.9950,0.9947,0.9949]]}]');
+  await new Promise(resolve => setTimeout(resolve, 60));
   const batch = posted.find(item => item.data?.type === 'PT_PO_MARKET_BATCH');
   const event = batch.data.events.find(item => item.eventName === 'loadHistoryPeriod');
   assert.equal(event.payload.asset, undefined);
