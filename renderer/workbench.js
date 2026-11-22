@@ -60,10 +60,15 @@
     say('Запрашиваю исторические свечи у Pocket Option…');
     const history=await api.requestAnalysisHistory({asset,timeframe});
     candles=await api.getAnalysisCandles({asset,timeframe,limit});
+    const diagnostics=await api.getAnalysisDiagnostics({asset,timeframe});
     if(!candles.length)throw new Error(history.reason || 'История свечей пока не получена. Проверь, что Pocket Option загружен и выбранная OTC-пара доступна.');
 
     selection={start:null,entry:null,end:null};renderSelection();
-    say('Загружено закрытых свечей: '+candles.length+'. Таймфрейм '+timeframe+'.');
+    const first=candles[0],last=candles[candles.length-1];
+    const events=diagnostics.historyEvents||[];
+    const eventSummary=events.slice(-3).map(x=>x.eventName+': '+x.acceptedCandles+'/'+x.inputRows+' OHLC, layout '+(x.detectedLayout||'не определён')+', отброшено '+x.rejectedRows).join(' | ');
+    say('Свечей: '+candles.length+' · '+asset+' · '+timeframe+' · диапазон '+stamp(first.startAt)+' — '+stamp(last.endAt)+' · последняя C='+last.close+' H='+last.high+' L='+last.low+'. '+(eventSummary||'Нет диагностических событий истории.'));
+    console.info('[Pocket Tracker] История Pocket Option', diagnostics);
     await refreshExamples();
   }
   async function refreshExamples() {
