@@ -119,7 +119,8 @@
     selection={start:null,entry:null,end:null};activeCandleIndex=candles.length-1;renderSelection();
     const first=candles[0],last=candles[candles.length-1];
     const events=diagnostics.historyEvents||[];
-    const providerCount=candles.filter(x=>x.source==='provider-ohlc').length,derivedCount=candles.filter(x=>x.source==='history-ticks').length;\n    const eventSummary=events.slice(-3).map(x=>x.eventName+': '+x.acceptedCandles+'/'+x.inputRows+' OHLC, layout '+(x.detectedLayout||'не определён')+', отброшено '+x.rejectedRows).join(' | ');
+    const providerCount=candles.filter(x=>x.source==='provider-ohlc').length,derivedCount=candles.filter(x=>x.source==='history-ticks').length;
+    const eventSummary=events.slice(-3).map(x=>x.eventName+': '+x.acceptedCandles+'/'+x.inputRows+' OHLC, layout '+(x.detectedLayout||'не определён')+', отброшено '+x.rejectedRows).join(' | ');
     say('Свечей: '+candles.length+' (прямой OHLC: '+providerCount+', из исторических тиков: '+derivedCount+') · '+asset+' · '+timeframe+' · диапазон '+stamp(first.startAt)+' — '+stamp(last.endAt)+' · последняя C='+last.close+' H='+last.high+' L='+last.low+'. '+(eventSummary||'Нет диагностических событий истории.'));
     console.info('[Pocket Tracker] История Pocket Option', diagnostics);
     await refreshExamples();
