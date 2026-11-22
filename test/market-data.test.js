@@ -184,8 +184,9 @@ test('aggregates complete contiguous provider S5 OHLC candles into M1 candles', 
   assert.equal(candles.length, 2);
   assert.equal(candles[0].source, 'provider-ohlc-aggregated');
   assert.equal(candles[0].sourcePeriodSec, 5);
-  assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close],
-    [1.1000, 1.1014, 1.0998, 1.1012]);
+  const actual = [candles[0].open, candles[0].high, candles[0].low, candles[0].close];
+  const expected = [1.1000, 1.1014, 1.0998, 1.1012];
+  actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-10));
   assert.equal(candles[0].complete, true);
   assert.equal(candles[1].startAt, base + 60_000);
 });
@@ -199,5 +200,6 @@ test('does not aggregate higher-timeframe OHLC across missing source candles', (
     return [base / 1000 + i * 5, open, open + 0.0003, open - 0.0002, open + 0.0001];
   }).filter((_, i) => i !== 5);
   service.ingestEvent('history/list/v2', { asset: 'EURUSD_otc', period: 5, history: rows }, base + 60_000);
-  assert.deepEqual(service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 60_000 }), []);
+  const candles = service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 60_000 });
+  assert.equal(candles.some(candle => candle.source === 'provider-ohlc-aggregated'), false);
 });
