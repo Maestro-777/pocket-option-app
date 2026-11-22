@@ -6,6 +6,7 @@ const MAX_ASSETS = 300;
 const MAX_TICKS_PER_ASSET = 12_000;
 const MAX_CANDLES_PER_ASSET_PERIOD = 2_000;
 const MAX_ROWS_PER_EVENT = 5_000;
+const MAX_HISTORY_DIAGNOSTICS = 30;
 const SUPPORTED_EVENTS = new Set([
   'updateAssets', 'updateStream', 'quotes/stream', 'updateHistoryNewFast',
   'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2'
@@ -62,6 +63,7 @@ function normalizeHistoryRows(assetRaw, rows, periodRaw, receivedAt) {
   const periodMs = Number.isFinite(periodSec) && periodSec >= 1 && periodSec <= 86_400 ? periodSec * 1000 : 0;
   const layout = periodMs ? detectOhlcLayout(rows) : null;
   const ticks = [], candles = [];
+  let rejectedRows = 0, tickRows = 0, candleRows = 0;
   for (const row of rows.slice(0, MAX_ROWS_PER_EVENT)) {
     if (!row) continue;
     let timestampRaw, priceRaw, ohlc = null;
@@ -79,7 +81,7 @@ function normalizeHistoryRows(assetRaw, rows, periodRaw, receivedAt) {
       // A five-column provider row is a candle, not a tick. If its OHLC
       // layout cannot be validated, reject it rather than inventing a close
       // and later rebuilding a different candle from sparse ticks.
-      if (priceRaw == null && row.length >= 5) continue;
+      if (priceRaw == null && row.length >= 5) { rejectedRows++; continue; }
       if (priceRaw == null) priceRaw = row[1];
     } else if (typeof row === 'object') {
       timestampRaw = row.time ?? row.t ?? row.ts;
@@ -91,14 +93,15 @@ function normalizeHistoryRows(assetRaw, rows, periodRaw, receivedAt) {
       }
     } else continue;
     const tick = normalizeTick(assetRaw, timestampRaw, priceRaw, receivedAt);
-    if (!tick) continue;
+    if (!tick) { rejectedRows++; continue; }
     ticks.push(tick);
+    if (ohlc) candleRows++; else tickRows++;
     if (ohlc && periodMs) {
       const startAt = Math.floor(tick.ts / periodMs) * periodMs;
       candles.push({ asset: tick.asset, periodSec, startAt, endAt: startAt + periodMs, ...ohlc, complete: startAt + periodMs <= receivedAt });
     }
   }
-  return { ticks, candles };
+  return { ticks, candles, diagnostics: { inputRows: Math.min(rows.length, MAX_ROWS_PER_EVENT), acceptedTicks: ticks.length, acceptedCandles: candles.length, rejectedRows, tickRows, candleRows, periodSec, detectedLayout: layout ? (layout.close === 2 ? 'O-C-H-L' : 'O-H-L-C') : null, first: candles[0] || null, last: candles[candles.length - 1] || null, rawFirst: rows[0] ?? null, rawLast: rows[Math.min(rows.length, MAX_ROWS_PER_EVENT) - 1] ?? null } };
 }
 
 function normalizeCatalog(payload) {
@@ -165,6 +168,7 @@ class MarketDataStore {
     this.lastEventAt = null;
     this.lastTickAt = null;
     this.lastEventName = null;
+    this.historyDiagnostics = [];
   }
   _assetState(asset) {
     if (!this.assets.has(asset)) {
@@ -189,6 +193,7 @@ class MarketDataStore {
     if (event.kind === 'ticks' || event.kind === 'history') {
       for (const tick of event.ticks) this._ingestTick(tick);
       for (const candle of event.candles || []) this._ingestCandle(candle);
+      if (event.kind === 'history') { this.historyDiagnostics.push({ eventName, asset: normalizeAssetName((Array.isArray(payload) ? payload[0] : payload)?.asset || ''), receivedAt, ...event.diagnostics }); if (this.historyDiagnostics.length > MAX_HISTORY_DIAGNOSTICS) this.historyDiagnostics.shift(); }
     }
     return { accepted: true, kind: event.kind, count: event.assets?.length || event.ticks?.length || 0 };
   }
@@ -293,7 +298,10 @@ class MarketDataService {
       this.store.lastEventAt = receivedAt;
       this.store.lastEventName = eventName;
       for (const candle of event.candles || []) this.store._ingestCandle(candle);
-      return { accepted: true, kind: 'history', count: (event.candles || []).length };
+      const data = Array.isArray(payload) && payload.length === 1 && payload[0] && typeof payload[0] === 'object' ? payload[0] : payload;
+      this.store.historyDiagnostics.push({ eventName, asset: normalizeAssetName(data?.asset || data?.a || ''), receivedAt, ...event.diagnostics });
+      if (this.store.historyDiagnostics.length > MAX_HISTORY_DIAGNOSTICS) this.store.historyDiagnostics.shift();
+      return { accepted: true, kind: 'history', count: (event.candles || []).length, diagnostics: event.diagnostics };
     }
     return this.store.ingest(eventName, payload, receivedAt);
   }
@@ -327,6 +335,13 @@ class MarketDataService {
   getLatestDataTime(asset, timeframe) {
     const rows = this.getCandles(asset, timeframe, { limit: 2000 });
     return rows.length ? rows[rows.length - 1].endAt : null;
+  }
+  getDiagnostics(asset, timeframe) {
+    const normalized = normalizeAssetName(asset);
+    const duration = require('./timeframes').getTimeframeDuration(timeframe) / 1000;
+    const events = this.store.historyDiagnostics.filter(item => !normalized || item.asset === normalized);
+    const candles = this.getCandles(normalized, timeframe, { limit: 2000, includeIncomplete: true });
+    return { asset: normalized, timeframe: String(timeframe).toUpperCase(), periodSec: duration, historyEvents: events.slice(-10), storedCandles: candles.length, first: candles[0] || null, last: candles[candles.length - 1] || null };
   }
   getStatus() {
     const snapshot = this.store.getSnapshot();
