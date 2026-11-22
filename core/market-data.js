@@ -341,8 +341,8 @@ class MarketDataService {
     // When the broker supplies a smaller OHLC period (commonly S5), build
     // larger candles only from a complete, contiguous set of real provider
     // OHLC candles. Never aggregate sparse price points or incomplete bars.
-    let providerCandles = nativeCandles;
-    if (!nativeCandles.length) {
+    const providerByStart = new Map(nativeCandles.map(candle => [candle.startAt, candle]));
+    {
       const state = this.store.assets.get(normalizeAssetName(asset));
       const sourcePeriods = state ? [...state.candles.keys()].map(Number)
         .filter(seconds => Number.isInteger(seconds) && seconds > 0 && seconds * 1000 < duration && duration % (seconds * 1000) === 0)
@@ -376,9 +376,13 @@ class MarketDataService {
             source: 'provider-ohlc-aggregated', sourcePeriodSec
           });
         }
-        if (aggregated.length) { providerCandles = aggregated; break; }
+        if (aggregated.length) {
+          for (const candle of aggregated) if (!providerByStart.has(candle.startAt)) providerByStart.set(candle.startAt, candle);
+          break;
+        }
       }
     }
+    const providerCandles = [...providerByStart.values()].sort((a, b) => a.startAt - b.startAt);
     // Pocket Tracker 3.6.0 falls back to historical price points when the
     // payload has five columns but its OHLC layout cannot be established.
     // Aggregate those real received prices into explicitly-labelled candles;
