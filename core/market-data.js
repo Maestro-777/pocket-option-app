@@ -295,23 +295,8 @@ class MarketDataService {
     const event = parseMarketEvent(eventName, payload, receivedAt);
     if (!event) return { accepted: false, reason: 'unsupported-or-invalid-payload' };
     if (event.kind === 'history') {
-      // Historical OHLC is kept in the candle store, not counted as live ticks.
-      this.store.eventCount++;
-      this.store.lastEventAt = receivedAt;
-      this.store.lastEventName = eventName;
-      const data = Array.isArray(payload) && payload.length === 1 && payload[0] && typeof payload[0] === 'object' ? payload[0] : payload;
-      const historyAsset = normalizeAssetName(data?.asset || data?.a || '');
-      if (historyAsset) {
-        const state = this.store._assetState(historyAsset);
-        for (const tick of event.ticks || []) state.historyTicks.push({ ...tick });
-        if (state.historyTicks.length > this.store.maxTicksPerAsset) {
-          state.historyTicks.splice(0, state.historyTicks.length - this.store.maxTicksPerAsset);
-        }
-      }
-      for (const candle of event.candles || []) this.store._ingestCandle(candle);
-      this.store.historyDiagnostics.push({ eventName, asset: normalizeAssetName(data?.asset || data?.a || ''), receivedAt, ...event.diagnostics });
-      if (this.store.historyDiagnostics.length > MAX_HISTORY_DIAGNOSTICS) this.store.historyDiagnostics.shift();
-      return { accepted: true, kind: 'history', count: (event.candles || []).length, diagnostics: event.diagnostics };
+      // Historical broker payloads are intentionally ignored in live-only mode.
+      return { accepted: false, reason: 'historical-data-disabled' };
     }
     return this.store.ingest(eventName, payload, receivedAt);
   }
@@ -333,67 +318,17 @@ class MarketDataService {
   getCandles(asset, timeframe, options = {}) {
     const limit = Math.max(1, Math.min(2000, Number(options.limit) || 500));
     const asOf = options.asOf == null ? Date.now() : Number(options.asOf);
-    const duration = require('./timeframes').getTimeframeDuration(timeframe);
     const state = this.store.assets.get(normalizeAssetName(asset));
-    const nativeCandles = this.store.getCandles(asset, duration / 1000, 2000)
-      .filter(candle => candle.endAt <= asOf && (options.includeIncomplete === true || candle.complete))
-      .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase(), source: 'provider-ohlc' }));
-    // When the broker supplies a smaller OHLC period (commonly S5), build
-    // larger candles only from a complete, contiguous set of real provider
-    // OHLC candles. Never aggregate sparse price points or incomplete bars.
-    const providerByStart = new Map(nativeCandles.map(candle => [candle.startAt, candle]));
-    {
-      const state = this.store.assets.get(normalizeAssetName(asset));
-      const sourcePeriods = state ? [...state.candles.keys()].map(Number)
-        .filter(seconds => Number.isInteger(seconds) && seconds > 0 && seconds * 1000 < duration && duration % (seconds * 1000) === 0)
-        .sort((a, b) => b - a) : [];
-      for (const sourcePeriodSec of sourcePeriods) {
-        const sourceDuration = sourcePeriodSec * 1000;
-        const sourceRows = this.store.getCandles(asset, sourcePeriodSec, 2000)
-          .filter(candle => candle.complete === true && candle.endAt <= asOf)
-          .sort((a, b) => a.startAt - b.startAt);
-        const buckets = new Map();
-        for (const candle of sourceRows) {
-          const startAt = Math.floor(candle.startAt / duration) * duration;
-          const bucket = buckets.get(startAt) || [];
-          bucket.push(candle);
-          buckets.set(startAt, bucket);
-        }
-        const aggregated = [];
-        const expected = duration / sourceDuration;
-        for (const [startAt, rows] of buckets) {
-          if (rows.length !== expected) continue;
-          rows.sort((a, b) => a.startAt - b.startAt);
-          if (rows.some((row, index) => row.startAt !== startAt + index * sourceDuration ||
-              row.endAt !== row.startAt + sourceDuration || row.complete !== true)) continue;
-          const first = rows[0], last = rows[rows.length - 1];
-          aggregated.push({
-            asset: first.asset, timeframe: String(timeframe).toUpperCase(),
-            startAt, endAt: startAt + duration,
-            open: first.open, high: Math.max(...rows.map(row => row.high)),
-            low: Math.min(...rows.map(row => row.low)), close: last.close,
-            complete: true, tickCount: rows.reduce((sum, row) => sum + (Number(row.tickCount) || 0), 0),
-            source: 'provider-ohlc-aggregated', sourcePeriodSec
-          });
-        }
-        if (aggregated.length) {
-          for (const candle of aggregated) if (!providerByStart.has(candle.startAt)) providerByStart.set(candle.startAt, candle);
-          break;
-        }
-      }
-    }
-    const providerCandles = [...providerByStart.values()].sort((a, b) => a.startAt - b.startAt);
-    // Pocket Tracker 3.6.0 falls back to historical price points when the
-    // payload has five columns but its OHLC layout cannot be established.
-    // Aggregate those real received prices into explicitly-labelled candles;
-    // provider OHLC always wins for a bucket when it exists.
-    const derivedCandles = state && state.historyTicks.length
-      ? aggregateTicksToCandles(state.historyTicks, timeframe, { asOf, includeIncomplete: options.includeIncomplete === true })
-          .map(candle => ({ ...candle, source: 'history-ticks' }))
-      : [];
-    const byStart = new Map(derivedCandles.map(candle => [candle.startAt, candle]));
-    for (const candle of providerCandles) byStart.set(candle.startAt, candle);
-    return [...byStart.values()].sort((a, b) => a.startAt - b.startAt).slice(-limit);
+    if (!state) return [];
+    // The chart and analysis now use only prices received live in this session.
+    return aggregateTicksToCandles(state.ticks, timeframe, {
+      asOf,
+      includeIncomplete: options.includeIncomplete === true
+    }).slice(-limit).map(candle => ({
+      ...candle,
+      timeframe: String(timeframe).toUpperCase(),
+      source: 'live-ticks'
+    }));
   }
   getLatestDataTime(asset, timeframe) {
     const rows = this.getCandles(asset, timeframe, { limit: 2000 });
@@ -424,7 +359,7 @@ class MarketDataService {
       for (const tick of state.historyTicks || []) historyTicks.push({ asset, ts: tick.ts, price: tick.price });
     }
     return { schemaVersion: 2, savedAt: new Date().toISOString(), connected: false,
-      catalog: Array.from(this.store.catalog.values()).map(item => ({ ...item })), ticks, history, historyTicks };
+      catalog: Array.from(this.store.catalog.values()).map(item => ({ ...item })), ticks, history: [], historyTicks: [] };
   }
   restoreSnapshot(snapshot) {
     if (!snapshot || ![1, 2].includes(snapshot.schemaVersion) || !Array.isArray(snapshot.ticks) ||
