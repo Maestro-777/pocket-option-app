@@ -99,13 +99,14 @@ test('reassembles a Socket.IO event after all binary attachments arrive', async 
   const encoder = new TextEncoder();
   ws.emit(encoder.encode('{"rows":[[1700000000,0.9948]]}').buffer);
   await new Promise(resolve => setTimeout(resolve, 60));
-  let batch = posted.find(item => item.data?.type === 'PT_PO_MARKET_BATCH');
-  assert.equal(batch, undefined, 'event must wait for every attachment');
+  let batches = posted.filter(item => item.data?.type === 'PT_PO_MARKET_BATCH');
+  assert.equal(batches.flatMap(item => item.data.events).some(item => item.eventName === 'loadHistoryPeriod'), false,
+    'history event must wait for every attachment');
   ws.emit(encoder.encode('{"rows":[[1700000005,0.9949]]}').buffer);
   await new Promise(resolve => setTimeout(resolve, 60));
-  batch = posted.find(item => item.data?.type === 'PT_PO_MARKET_BATCH');
-  assert.ok(batch);
-  const event = batch.data.events.find(item => item.eventName === 'loadHistoryPeriod');
+  batches = posted.filter(item => item.data?.type === 'PT_PO_MARKET_BATCH');
+  const event = batches.flatMap(item => item.data.events).find(item => item.eventName === 'loadHistoryPeriod');
+  assert.ok(event);
   assert.deepEqual(JSON.parse(JSON.stringify(event.payload.history.first)), { rows: [[1700000000, 0.9948]] });
   assert.deepEqual(JSON.parse(JSON.stringify(event.payload.history.second)), { rows: [[1700000005, 0.9949]] });
 });
