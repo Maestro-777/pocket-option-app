@@ -116,7 +116,7 @@ test('aggregates stored per-asset ticks into the agreed timeframes', () => {
 });
 
 
-test('does not fabricate chart candles from ticks when provider OHLC history is absent', () => {
+test('builds an in-progress chart candle from live ticks without historical data', () => {
   const service = new (require('../core/market-data').MarketDataService)();
   const base = 1_700_000_000_000;
   service.ingestEvent('updateStream', [
@@ -124,7 +124,11 @@ test('does not fabricate chart candles from ticks when provider OHLC history is 
     ['EURUSD_otc', base / 1000 + 2, 1.20],
     ['EURUSD_otc', base / 1000 + 3, 1.05]
   ], base + 10_000);
-  assert.deepEqual(service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000 }), []);
+  const candles = service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000, includeIncomplete: true });
+  assert.equal(candles.length, 1);
+  assert.equal(candles[0].source, 'live-ticks');
+  assert.equal(candles[0].complete, false);
+  assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close], [1.10, 1.20, 1.05, 1.05]);
 });
 
 test('keeps ambiguous five-column history as price points, not provider candles', () => {
@@ -138,27 +142,16 @@ test('keeps ambiguous five-column history as price points, not provider candles'
 });
 
 
-test('uses Pocket Tracker 3.6.0 price-point fallback for ambiguous five-column history rows', () => {
-  const { normalizeHistoryRows, MarketDataService } = require('../core/market-data');
-  const rows = [
-    [1_700_000_000, 0.99480, 0.99490, 0.99482, 0.99470],
-    [1_700_000_005, 0.99478, 0.99495, 0.99490, 0.99475],
-    [1_700_000_010, 0.99488, 0.99498, 0.99492, 0.99480]
-  ];
-  const parsed = normalizeHistoryRows('AUDCAD_otc', rows, 5, 1_700_000_030_000);
-  assert.equal(parsed.candles.length, 0);
-  assert.equal(parsed.ticks.length, 3);
-  assert.equal(parsed.ticks[0].price, 0.99490);
-
+test('ignores broker history events in live-only mode', () => {
+  const { MarketDataService } = require('../core/market-data');
   const service = new MarketDataService();
-  service.ingestEvent('loadHistoryPeriod', {
-    asset: 'AUDCAD_otc', period: 5, history: rows
+  const result = service.ingestEvent('loadHistoryPeriod', {
+    asset: 'AUDCAD_otc', period: 5,
+    history: [[1_700_000_000, 0.99480, 0.99490, 0.99482, 0.99470]]
   }, 1_700_000_030_000);
-  const candles = service.getCandles('AUDCAD_OTC', 'S5', { asOf: 1_700_000_030_000 });
-  assert.equal(candles.length, 3);
-  assert.equal(candles[0].source, 'history-ticks');
-  assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close],
-    [0.99490, 0.99490, 0.99490, 0.99490]);
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, 'historical-data-disabled');
+  assert.deepEqual(service.getCandles('AUDCAD_OTC', 'S5', { asOf: 1_700_000_030_000, includeIncomplete: true }), []);
 });
 
 test('accepts object history rows with timestamp property', () => {
@@ -171,35 +164,13 @@ test('accepts object history rows with timestamp property', () => {
 });
 
 
-test('aggregates complete contiguous provider S5 OHLC candles into M1 candles', () => {
+test('does not restore broker OHLC history into the live chart', () => {
   const { MarketDataService } = require('../core/market-data');
   const service = new MarketDataService();
-  const base = 1_700_000_040_000;
-  const rows = Array.from({ length: 24 }, (_, i) => {
-    const open = 1.1000 + i * 0.0001;
-    return [base / 1000 + i * 5, open, open + 0.0003, open - 0.0002, open + 0.0001];
-  });
-  service.ingestEvent('history/list/v2', { asset: 'EURUSD_otc', period: 5, history: rows }, base + 120_000);
-  const candles = service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 120_000, limit: 10 });
-  assert.equal(candles.length, 2);
-  assert.equal(candles[0].source, 'provider-ohlc-aggregated');
-  assert.equal(candles[0].sourcePeriodSec, 5);
-  const actual = [candles[0].open, candles[0].high, candles[0].low, candles[0].close];
-  const expected = [1.1000, 1.1014, 1.0998, 1.1012];
-  actual.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-10));
-  assert.equal(candles[0].complete, true);
-  assert.equal(candles[1].startAt, base + 60_000);
+  service.ingestEvent('history/list/v2', {
+    asset: 'EURUSD_otc', period: 5,
+    history: [[1_700_000_040, 1.1000, 1.1003, 1.0998, 1.1001]]
+  }, 1_700_000_100_000);
+  assert.deepEqual(service.getCandles('EURUSD_OTC', 'M1', { asOf: 1_700_000_100_000, includeIncomplete: true }), []);
 });
 
-test('does not aggregate higher-timeframe OHLC across missing source candles', () => {
-  const { MarketDataService } = require('../core/market-data');
-  const service = new MarketDataService();
-  const base = 1_700_000_040_000;
-  const rows = Array.from({ length: 12 }, (_, i) => {
-    const open = 1.1000 + i * 0.0001;
-    return [base / 1000 + i * 5, open, open + 0.0003, open - 0.0002, open + 0.0001];
-  }).filter((_, i) => i !== 5);
-  service.ingestEvent('history/list/v2', { asset: 'EURUSD_otc', period: 5, history: rows }, base + 60_000);
-  const candles = service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 60_000 });
-  assert.equal(candles.some(candle => candle.source === 'provider-ohlc-aggregated'), false);
-});
