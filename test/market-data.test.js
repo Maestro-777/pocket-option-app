@@ -135,3 +135,36 @@ test('rejects ambiguous provider candle rows instead of treating close as a tick
   assert.equal(parsed.candles.length, 0);
   assert.equal(parsed.ticks.length, 0);
 });
+
+
+test('uses Pocket Tracker 3.6.0 price-point fallback for ambiguous five-column history rows', () => {
+  const { normalizeHistoryRows, MarketDataService } = require('../core/market-data');
+  const rows = [
+    [1_700_000_000, 0.99480, 0.99482, 0.99470, 0.99478],
+    [1_700_000_005, 0.99478, 0.99490, 0.99475, 0.99488],
+    [1_700_000_010, 0.99488, 0.99492, 0.99480, 0.99485]
+  ];
+  const parsed = normalizeHistoryRows('AUDCAD_otc', rows, 5, 1_700_000_030_000);
+  assert.equal(parsed.candles.length, 0);
+  assert.equal(parsed.ticks.length, 3);
+  assert.equal(parsed.ticks[0].price, 0.99482);
+
+  const service = new MarketDataService();
+  service.ingestEvent('loadHistoryPeriod', {
+    asset: 'AUDCAD_otc', period: 5, history: rows
+  }, 1_700_000_030_000);
+  const candles = service.getCandles('AUDCAD_OTC', 'S5', { asOf: 1_700_000_030_000 });
+  assert.equal(candles.length, 3);
+  assert.equal(candles[0].source, 'history-ticks');
+  assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close],
+    [0.99482, 0.99482, 0.99482, 0.99482]);
+});
+
+test('accepts object history rows with timestamp property', () => {
+  const { normalizeHistoryRows } = require('../core/market-data');
+  const parsed = normalizeHistoryRows('AUDCAD_otc', [
+    { timestamp: 1_700_000_000, open: 0.9948, high: 0.9950, low: 0.9947, close: 0.9949 }
+  ], 5, 1_700_000_010_000);
+  assert.equal(parsed.candles.length, 1);
+  assert.equal(parsed.candles[0].close, 0.9949);
+});
