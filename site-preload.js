@@ -19,8 +19,46 @@ function installMarketWebSocketTap() {
     'updateHistoryNew', 'loadHistoryPeriod', 'loadHistoryPeriodFast', 'history/list/v2'
   ]);
   const pending = new WeakMap();
+  // Track history requests per socket. A response may inherit the requested
+  // asset/period only when exactly one outstanding request can own it.
+  const historyRequests = new WeakMap();
+  const HISTORY_REQUEST_TTL_MS = 20_000;
   let queue = [];
   let flushTimer = null;
+
+  function readHistoryEnvelope(payload) {
+    if (Array.isArray(payload)) {
+      const row = payload.find(item => item && typeof item === 'object' && !Array.isArray(item));
+      return row || null;
+    }
+    return payload && typeof payload === 'object' ? payload : null;
+  }
+  function correlateHistory(eventName, payload, socket) {
+    if (!/history|loadHistoryPeriod/i.test(eventName) || eventName === 'updateStream') return payload;
+    const requests = (historyRequests.get(socket) || []).filter(item => Date.now() - item.sentAt <= HISTORY_REQUEST_TTL_MS);
+    historyRequests.set(socket, requests);
+    if (!requests.length) return payload;
+    const envelope = readHistoryEnvelope(payload);
+    const responseAsset = normalizeAsset(envelope?.asset || envelope?.symbol || '');
+    const responseIndex = envelope?.index ?? envelope?.requestId ?? envelope?.request_id;
+    let candidates = requests;
+    if (responseIndex != null) {
+      candidates = candidates.filter(item => String(item.index) === String(responseIndex) || item.requestId === String(responseIndex));
+    }
+    if (responseAsset) candidates = candidates.filter(item => item.asset === responseAsset);
+    if (envelope?.period != null) candidates = candidates.filter(item => item.period === Number(envelope.period));
+    // Never guess when multiple requests could own an unlabelled response.
+    if (candidates.length !== 1) return payload;
+    const request = candidates[0];
+    requests.splice(requests.indexOf(request), 1);
+    if (!envelope) return payload;
+    const enriched = { ...envelope };
+    if (!responseAsset) enriched.asset = request.rawAsset;
+    if (enriched.period == null) enriched.period = request.period;
+    enriched.__ptRequest = { requestId: request.requestId, index: request.index, asset: request.asset, period: request.period, sentAt: request.sentAt };
+    if (Array.isArray(payload)) return payload.map(item => item === envelope ? enriched : item);
+    return enriched;
+  }
 
   function flush() {
     flushTimer = null;
@@ -63,6 +101,7 @@ function installMarketWebSocketTap() {
       const eventName = parsed[0];
       const payload = parsed[1];
       if (!allowed.has(eventName)) return;
+      const correlatedPayload = correlateHistory(eventName, payload, socket);
       // Prefer the socket that actually carries Pocket Option market events;
       // the page may keep analytics/auth sockets open alongside the market socket.
       window.__PT_ACTIVE_MARKET_SOCKET__ = socket;
@@ -72,7 +111,7 @@ function installMarketWebSocketTap() {
         pending.set(socket, list);
         return;
       }
-      publish(eventName, payload);
+      publish(eventName, correlatedPayload);
       return;
     }
 
@@ -80,7 +119,7 @@ function installMarketWebSocketTap() {
     if (list.length) {
       const eventName = list.shift();
       pending.set(socket, list);
-      publish(eventName, parsed);
+      publish(eventName, correlateHistory(eventName, parsed, socket));
     }
   }
 
@@ -113,11 +152,24 @@ function installMarketWebSocketTap() {
     const raw = rawAssets.get(asset) || asset.replace(/_OTC$/, '_otc');
     const now = Math.floor(Date.now() / 1000);
     const offset = Math.max(period * 90, period <= 30 ? 9000 : 45000);
-    try { ws.send('42["changeSymbol",' + JSON.stringify({ asset: raw, period }) + ']'); } catch (_) {}
+    const requestId = String(data && data.requestId || '');
+    const request = { requestId, asset, rawAsset: raw, period, index: now, sentAt: Date.now() };
+    const requests = historyRequests.get(ws) || [];
+    // Expire abandoned requests, but preserve concurrent requests so an
+    // unlabelled response cannot be silently assigned to the newest pair.
+    const active = requests.filter(item => Date.now() - item.sentAt <= HISTORY_REQUEST_TTL_MS);
+    active.push(request);
+    historyRequests.set(ws, active);
+    try { ws.send('42["changeSymbol",' + JSON.stringify({ asset: raw, period }) + ']'); } catch (_) {
+      active.splice(active.indexOf(request), 1); return false;
+    }
     try {
       ws.send('42["loadHistoryPeriod",' + JSON.stringify({ asset: raw, index: now, time: now, offset, period }) + ']');
       return true;
-    } catch (_) { return false; }
+    } catch (_) {
+      active.splice(active.indexOf(request), 1);
+      return false;
+    }
   }
   window.addEventListener('message', event => {
     if (event.source !== window || event.origin !== location.origin || !event.data || event.data.type !== 'PT_REQUEST_HISTORY') return;
