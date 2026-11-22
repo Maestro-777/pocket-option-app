@@ -299,6 +299,7 @@ class MarketDataService {
       this.store.eventCount++;
       this.store.lastEventAt = receivedAt;
       this.store.lastEventName = eventName;
+      const data = Array.isArray(payload) && payload.length === 1 && payload[0] && typeof payload[0] === 'object' ? payload[0] : payload;
       const historyAsset = normalizeAssetName(data?.asset || data?.a || '');
       if (historyAsset) {
         const state = this.store._assetState(historyAsset);
@@ -308,7 +309,6 @@ class MarketDataService {
         }
       }
       for (const candle of event.candles || []) this.store._ingestCandle(candle);
-      const data = Array.isArray(payload) && payload.length === 1 && payload[0] && typeof payload[0] === 'object' ? payload[0] : payload;
       this.store.historyDiagnostics.push({ eventName, asset: normalizeAssetName(data?.asset || data?.a || ''), receivedAt, ...event.diagnostics });
       if (this.store.historyDiagnostics.length > MAX_HISTORY_DIAGNOSTICS) this.store.historyDiagnostics.shift();
       return { accepted: true, kind: 'history', count: (event.candles || []).length, diagnostics: event.diagnostics };
