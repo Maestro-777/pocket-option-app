@@ -15,6 +15,20 @@ test('forwards bounded historical candle payloads without rewriting OHLC fields'
  assert.deepEqual(Array.from(messages[0].data.payload[0].history[0]),[1700000000,1.1,1.2,1.0,1.15]);
 });
 
+test('preserves history request correlation metadata from broker payloads',()=>{
+ const {window,messages}=setup(),ws=new window.WebSocket('wss://market.invalid');
+ ws.emit('42["loadHistoryPeriod",{"asset":"AUDCAD_otc","period":5,"index":731,"requestId":"req-731","symbol_id":42,"time":1700000000,"offset":300,"history":[[1700000000,0.9948,0.9950,0.9947,0.9949]]}]');
+ assert.equal(messages.length,1);
+ const envelope=messages[0].data.payload[0];
+ assert.equal(envelope.asset,'AUDCAD_otc');
+ assert.equal(envelope.period,5);
+ assert.equal(envelope.index,731);
+ assert.equal(envelope.requestId,'req-731');
+ assert.equal(envelope.symbol_id,42);
+ assert.equal(envelope.time,1700000000);
+ assert.equal(envelope.offset,300);
+});
+
 test('fails closed when no market socket is available for a trade command',async()=>{const{window}=setup();const result=await window.__PT_TRADE_COMMAND__({version:1,tradeId:'no-socket',asset:'EURUSD_OTC',rawAsset:'EURUSD_otc',direction:'UP',amount:1,expirySeconds:15});assert.equal(result.ok,false);assert.equal(result.reason,'market_socket_not_ready');});
 test('submits only after the current DOM asset, amount and expiry are verified',async()=>{
  const messages=[];let clicks=0,sent=[];
