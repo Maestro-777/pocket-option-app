@@ -169,3 +169,35 @@ test('accepts object history rows with timestamp property', () => {
   assert.equal(parsed.candles.length, 1);
   assert.equal(parsed.candles[0].close, 0.9949);
 });
+
+
+test('aggregates complete contiguous provider S5 OHLC candles into M1 candles', () => {
+  const { MarketDataService } = require('../core/market-data');
+  const service = new MarketDataService();
+  const base = 1_700_000_040_000;
+  const rows = Array.from({ length: 24 }, (_, i) => {
+    const open = 1.1000 + i * 0.0001;
+    return [base / 1000 + i * 5, open, open + 0.0003, open - 0.0002, open + 0.0001];
+  });
+  service.ingestEvent('history/list/v2', { asset: 'EURUSD_otc', period: 5, history: rows }, base + 120_000);
+  const candles = service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 120_000, limit: 10 });
+  assert.equal(candles.length, 2);
+  assert.equal(candles[0].source, 'provider-ohlc-aggregated');
+  assert.equal(candles[0].sourcePeriodSec, 5);
+  assert.deepEqual([candles[0].open, candles[0].high, candles[0].low, candles[0].close],
+    [1.1000, 1.1014, 1.0998, 1.1012]);
+  assert.equal(candles[0].complete, true);
+  assert.equal(candles[1].startAt, base + 60_000);
+});
+
+test('does not aggregate higher-timeframe OHLC across missing source candles', () => {
+  const { MarketDataService } = require('../core/market-data');
+  const service = new MarketDataService();
+  const base = 1_700_000_040_000;
+  const rows = Array.from({ length: 12 }, (_, i) => {
+    const open = 1.1000 + i * 0.0001;
+    return [base / 1000 + i * 5, open, open + 0.0003, open - 0.0002, open + 0.0001];
+  }).filter((_, i) => i !== 5);
+  service.ingestEvent('history/list/v2', { asset: 'EURUSD_otc', period: 5, history: rows }, base + 60_000);
+  assert.deepEqual(service.getCandles('EURUSD_OTC', 'M1', { asOf: base + 60_000 }), []);
+});
