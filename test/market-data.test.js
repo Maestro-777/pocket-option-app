@@ -114,3 +114,24 @@ test('aggregates stored per-asset ticks into the agreed timeframes', () => {
   );
   assert.equal(candles.every(candle => candle.complete), true);
 });
+
+
+test('does not fabricate chart candles from ticks when provider OHLC history is absent', () => {
+  const service = new (require('../core/market-data').MarketDataService)();
+  const base = 1_700_000_000_000;
+  service.ingestEvent('updateStream', [
+    ['EURUSD_otc', base / 1000 + 1, 1.10],
+    ['EURUSD_otc', base / 1000 + 2, 1.20],
+    ['EURUSD_otc', base / 1000 + 3, 1.05]
+  ], base + 10_000);
+  assert.deepEqual(service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000 }), []);
+});
+
+test('rejects ambiguous provider candle rows instead of treating close as a tick', () => {
+  const { normalizeHistoryRows } = require('../core/market-data');
+  const parsed = normalizeHistoryRows('EURUSD_otc', [
+    [1_700_000_000, 1.1, 1.2, 1.3, 1.4]
+  ], 60, 1_700_000_120_000);
+  assert.equal(parsed.candles.length, 0);
+  assert.equal(parsed.ticks.length, 0);
+});
