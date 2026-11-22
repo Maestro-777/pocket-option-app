@@ -2,11 +2,12 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {MarketDataService}=require('../core/market-data');
 const {SignalScheduler,rankCandidates,normalizeSchedulerConfig}=require('../core/signal-scheduler');
+function ingestProviderCandles(market,candles,receivedAt=Date.now()){const grouped=new Map();for(const c of candles){if(!grouped.has(c.asset))grouped.set(c.asset,[]);grouped.get(c.asset).push([c.startAt/1000,c.open,c.high,c.low,c.close]);}for(const[asset,history]of grouped)market.ingestEvent('history/list/v2',{asset,period:5,history},receivedAt);}
 function makeCandles(base){return [[1,1.2,.9,1.1],[1.1,1.3,1,1.2],[1.2,1.25,1.05,1.1]].map((p,i)=>({asset:'EURUSD_OTC',timeframe:'S5',startAt:base+i*5000,endAt:base+(i+1)*5000,open:p[0],high:p[1],low:p[2],close:p[3],complete:true,tickCount:2}));}
 test('scheduler analyzes every newly closed OTC bar once and journals the full decision',async()=>{
  const market=new MarketDataService(),currentBucket=Math.floor(Date.now()/5000)*5000,history=makeCandles(currentBucket-15000);
  const ticks=[];for(const c of history){ticks.push(['EURUSD_OTC',c.startAt+500,c.open],['EURUSD_OTC',c.startAt+1500,c.high],['EURUSD_OTC',c.startAt+2500,c.low],['EURUSD_OTC',c.startAt+3500,c.close]);}
- ticks.push(['EURUSD_OTC',currentBucket+1000,1.11]);market.ingestTicks(ticks);
+ ticks.push(['EURUSD_OTC',currentBucket+1000,1.11]);market.ingestTicks(ticks);ingestProviderCandles(market,history,currentBucket+1000);
  const examples=Array.from({length:3},(_,i)=>({id:'sample-'+i,pair:'GBPUSD_OTC',timeframe:'S5',direction:'UP',entryAt:currentBucket,preEntryCandles:history}));
  const journalRows=[],scheduler=new SignalScheduler({marketData:market,exampleStore:{list:async()=>examples},journal:{append:async(...args)=>{journalRows.push(args);return{id:'journal-'+journalRows.length};}},getConfig:()=>({timeframes:['S5'],lookback:3,maxOpenTrades:2,matcher:{topK:3,similarityThreshold:99,minExamples:3,minDirectionalMatches:3,patternLength:3}})});
  const first=await scheduler.scan();assert.equal(first.scanned,1);assert.equal(first.signals.length,1);assert.equal(first.signals[0].decision.direction,'UP');assert.equal(first.signals[0].withinConfiguredLimit,true);assert.equal(journalRows.length,1);assert.equal(journalRows[0][0],'DECISION');
@@ -22,7 +23,7 @@ test('restores and persists last-scanned bar state through ScanStateStore',async
 test('ranks only into currently free execution slots after accounting for open and reserved trades',async()=>{
  const market=new MarketDataService(),currentBucket=Math.floor(Date.now()/5000)*5000,base=makeCandles(currentBucket-15000),ticks=[];
  for(const asset of ['EURUSD_OTC','GBPUSD_OTC'])for(const c of base){ticks.push([asset,c.startAt+500,c.open],[asset,c.startAt+1500,c.high],[asset,c.startAt+2500,c.low],[asset,c.startAt+3500,c.close]);}
- ticks.push(['EURUSD_OTC',currentBucket+1000,1.11],['GBPUSD_OTC',currentBucket+1000,1.11]);market.ingestTicks(ticks);
+ ticks.push(['EURUSD_OTC',currentBucket+1000,1.11],['GBPUSD_OTC',currentBucket+1000,1.11]);market.ingestTicks(ticks);ingestProviderCandles(market,[...base,...base.map(c=>({...c,asset:'GBPUSD_OTC'}))],currentBucket+1000);
  const examples=Array.from({length:3},(_,i)=>({id:'slot-'+i,pair:'AUDUSD_OTC',timeframe:'S5',direction:'UP',entryAt:currentBucket,preEntryCandles:base}));
  const scheduler=new SignalScheduler({marketData:market,exampleStore:{list:async()=>examples},getOpenTradeCount:()=>1,getConfig:()=>({timeframes:['S5'],lookback:3,maxOpenTrades:2,matcher:{topK:3,similarityThreshold:99,minExamples:3,minDirectionalMatches:2,patternLength:3}})});
  const result=await scheduler.scan();assert.equal(result.signals.length,2);assert.equal(result.topCandidateSignalIds.length,1);assert.equal(result.signals.filter(x=>x.withinConfiguredLimit).length,1);assert.equal(scheduler.getStatus().availableSlots,1);assert.equal(scheduler.getStatus().occupiedSlots,1);
