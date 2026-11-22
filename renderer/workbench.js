@@ -96,7 +96,8 @@
     const rows=await api.getAnalysisAssets(),select=$('wb-asset'),previous=select.value;
     select.innerHTML='<option value="">Выбери OTC-пару</option>'+rows.map(x=>'<option value="'+esc(x.asset)+'">'+esc(x.asset)+'</option>').join('');
     if(rows.some(x=>x.asset===previous))select.value=previous;
-    say('В потоке обнаружено OTC-пар: '+rows.length+'.');\n    await refreshCurrentQuote();
+    say('В потоке обнаружено OTC-пар: '+rows.length+'.');
+    await refreshCurrentQuote();
   }
   async function loadCandles() {
     const asset=$('wb-asset').value, timeframe=$('wb-timeframe').value, limit=Number($('wb-limit').value);
