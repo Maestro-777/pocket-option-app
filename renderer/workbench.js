@@ -59,9 +59,16 @@
     if(!asset)throw new Error('Сначала выбери OTC-пару.');
     say('Запрашиваю исторические свечи у Pocket Option…');
     const history=await api.requestAnalysisHistory({asset,timeframe});
-    candles=await api.getAnalysisCandles({asset,timeframe,limit});
     const diagnostics=await api.getAnalysisDiagnostics({asset,timeframe});
-    if(!candles.length)throw new Error(history.reason || 'История свечей пока не получена. Проверь, что Pocket Option загружен и выбранная OTC-пара доступна.');
+    console.info('[Pocket Tracker] История Pocket Option', diagnostics);
+    if(!history.ok) {
+      candles=[];
+      selection={start:null,entry:null,end:null};
+      renderSelection();
+      throw new Error(history.reason || 'Pocket Option не подтвердил получение новой OHLC-истории.');
+    }
+    candles=await api.getAnalysisCandles({asset,timeframe,limit});
+    if(!candles.length)throw new Error('Pocket Option подтвердил историю, но в хранилище нет закрытых OHLC-свечей.');
 
     selection={start:null,entry:null,end:null};renderSelection();
     const first=candles[0],last=candles[candles.length-1];
