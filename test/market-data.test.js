@@ -127,13 +127,14 @@ test('does not fabricate chart candles from ticks when provider OHLC history is 
   assert.deepEqual(service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000 }), []);
 });
 
-test('rejects ambiguous provider candle rows instead of treating close as a tick', () => {
+test('keeps ambiguous five-column history as price points, not provider candles', () => {
   const { normalizeHistoryRows } = require('../core/market-data');
   const parsed = normalizeHistoryRows('EURUSD_otc', [
     [1_700_000_000, 1.1, 1.2, 1.3, 1.4]
   ], 60, 1_700_000_120_000);
   assert.equal(parsed.candles.length, 0);
-  assert.equal(parsed.ticks.length, 0);
+  assert.equal(parsed.ticks.length, 1);
+  assert.equal(parsed.ticks[0].price, 1.2);
 });
 
 
