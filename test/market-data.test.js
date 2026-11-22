@@ -141,9 +141,9 @@ test('keeps ambiguous five-column history as price points, not provider candles'
 test('uses Pocket Tracker 3.6.0 price-point fallback for ambiguous five-column history rows', () => {
   const { normalizeHistoryRows, MarketDataService } = require('../core/market-data');
   const rows = [
-    [1_700_000_000, 0.99480, 0.99482, 0.99470, 0.99478],
-    [1_700_000_005, 0.99478, 0.99490, 0.99475, 0.99488],
-    [1_700_000_010, 0.99488, 0.99492, 0.99480, 0.99485]
+    [1_700_000_000, 0.99480, 0.99490, 0.99482, 0.99470],
+    [1_700_000_005, 0.99478, 0.99495, 0.99490, 0.99475],
+    [1_700_000_010, 0.99488, 0.99498, 0.99492, 0.99480]
   ];
   const parsed = normalizeHistoryRows('AUDCAD_otc', rows, 5, 1_700_000_030_000);
   assert.equal(parsed.candles.length, 0);
