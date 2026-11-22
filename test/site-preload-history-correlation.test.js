@@ -52,7 +52,7 @@ function setup() {
   return { pageWindow, pageContext, posted, pageListeners };
 }
 
-test('associates an unlabelled history response with its sole pending request', () => {
+test('associates an unlabelled history response with its sole pending request', async () => {
   const { pageWindow, posted, pageListeners } = setup();
   const ws = new pageWindow.WebSocket();
   ws.emit('42["updateStream",[["EURUSD_otc",1700000000,1.1]]]');
@@ -62,6 +62,7 @@ test('associates an unlabelled history response with its sole pending request', 
   }
   assert.ok(ws.sent.some(frame => frame.includes('"loadHistoryPeriod"')));
   ws.emit('42["loadHistoryPeriod",{"history":[[1700000000,0.9948,0.9950,0.9947,0.9949]]}]');
+  await new Promise(resolve => setTimeout(resolve, 60));
   const batch = posted.find(item => item.data?.type === 'PT_PO_MARKET_BATCH');
   assert.ok(batch);
   const event = batch.data.events.find(item => item.eventName === 'loadHistoryPeriod');
@@ -70,7 +71,7 @@ test('associates an unlabelled history response with its sole pending request', 
   assert.equal(event.payload.__ptRequest.requestId, 'history-test-1');
 });
 
-test('does not guess when multiple pending history requests have no identifying metadata', () => {
+test('does not guess when multiple pending history requests have no identifying metadata', async () => {
   const { pageWindow, posted, pageListeners } = setup();
   const ws = new pageWindow.WebSocket();
   ws.emit('42["updateStream",[["EURUSD_otc",1700000000,1.1]]]');
