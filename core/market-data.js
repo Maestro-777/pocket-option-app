@@ -335,9 +335,50 @@ class MarketDataService {
     const asOf = options.asOf == null ? Date.now() : Number(options.asOf);
     const duration = require('./timeframes').getTimeframeDuration(timeframe);
     const state = this.store.assets.get(normalizeAssetName(asset));
-    const providerCandles = this.store.getCandles(asset, duration / 1000, 2000)
+    const nativeCandles = this.store.getCandles(asset, duration / 1000, 2000)
       .filter(candle => candle.endAt <= asOf && (options.includeIncomplete === true || candle.complete))
       .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase(), source: 'provider-ohlc' }));
+    // When the broker supplies a smaller OHLC period (commonly S5), build
+    // larger candles only from a complete, contiguous set of real provider
+    // OHLC candles. Never aggregate sparse price points or incomplete bars.
+    let providerCandles = nativeCandles;
+    if (!nativeCandles.length) {
+      const state = this.store.assets.get(normalizeAssetName(asset));
+      const sourcePeriods = state ? [...state.candles.keys()].map(Number)
+        .filter(seconds => Number.isInteger(seconds) && seconds > 0 && seconds * 1000 < duration && duration % (seconds * 1000) === 0)
+        .sort((a, b) => b - a) : [];
+      for (const sourcePeriodSec of sourcePeriods) {
+        const sourceDuration = sourcePeriodSec * 1000;
+        const sourceRows = this.store.getCandles(asset, sourcePeriodSec, 2000)
+          .filter(candle => candle.complete === true && candle.endAt <= asOf)
+          .sort((a, b) => a.startAt - b.startAt);
+        const buckets = new Map();
+        for (const candle of sourceRows) {
+          const startAt = Math.floor(candle.startAt / duration) * duration;
+          const bucket = buckets.get(startAt) || [];
+          bucket.push(candle);
+          buckets.set(startAt, bucket);
+        }
+        const aggregated = [];
+        const expected = duration / sourceDuration;
+        for (const [startAt, rows] of buckets) {
+          if (rows.length !== expected) continue;
+          rows.sort((a, b) => a.startAt - b.startAt);
+          if (rows.some((row, index) => row.startAt !== startAt + index * sourceDuration ||
+              row.endAt !== row.startAt + sourceDuration || row.complete !== true)) continue;
+          const first = rows[0], last = rows[rows.length - 1];
+          aggregated.push({
+            asset: first.asset, timeframe: String(timeframe).toUpperCase(),
+            startAt, endAt: startAt + duration,
+            open: first.open, high: Math.max(...rows.map(row => row.high)),
+            low: Math.min(...rows.map(row => row.low)), close: last.close,
+            complete: true, tickCount: rows.reduce((sum, row) => sum + (Number(row.tickCount) || 0), 0),
+            source: 'provider-ohlc-aggregated', sourcePeriodSec
+          });
+        }
+        if (aggregated.length) { providerCandles = aggregated; break; }
+      }
+    }
     // Pocket Tracker 3.6.0 falls back to historical price points when the
     // payload has five columns but its OHLC layout cannot be established.
     // Aggregate those real received prices into explicitly-labelled candles;
