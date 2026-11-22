@@ -317,6 +317,14 @@ ipcMain.handle('analysis:request-history', async (event, request = {}) => {
   return { ok: false, count: candles.length, reason: 'Pocket Option не вернул историю. Проверь выбранную OTC-пару и соединение.' };
 });
 
+ipcMain.handle('analysis:get-diagnostics', (event, request = {}) => {
+  requireTrustedMainRenderer(event);
+  const asset = String(request.asset || '').trim().toUpperCase();
+  const timeframe = String(request.timeframe || '').trim().toUpperCase();
+  getTimeframeDuration(timeframe);
+  if (!/_OTC$/.test(asset)) throw new Error('Разрешены только OTC-пары');
+  return marketDataStore.getDiagnostics(asset, timeframe);
+});
 ipcMain.handle('analysis:get-candles', (event, request = {}) => {
   requireTrustedMainRenderer(event);
   const asset = String(request.asset || '').trim().toUpperCase();
@@ -528,6 +536,16 @@ ipcMain.on('site:market-batch', (event, batch) => {
   for (const item of safeBatch) {
     const result = marketDataStore.ingestEvent(item.eventName, item.payload, item.receivedAt);
     if (result.accepted) accepted++;
+    if (result.kind === 'history') {
+      const d = result.diagnostics || {};
+      log('info', 'Диагностика истории Pocket Option', {
+        eventName: item.eventName, asset: (Array.isArray(item.payload) ? item.payload[0] : item.payload)?.asset || null,
+        periodSec: d.periodSec, inputRows: d.inputRows, acceptedCandles: d.acceptedCandles,
+        acceptedTicks: d.acceptedTicks, rejectedRows: d.rejectedRows, tickRows: d.tickRows,
+        candleRows: d.candleRows, detectedLayout: d.detectedLayout,
+        first: d.first, last: d.last, rawFirst: d.rawFirst, rawLast: d.rawLast
+      });
+    }
   }
   if (accepted) {
     const snapshot = marketDataStore.store.getSnapshot(now);
