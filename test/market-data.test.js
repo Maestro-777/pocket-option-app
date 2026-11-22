@@ -123,8 +123,8 @@ test('builds an in-progress chart candle from live ticks without historical data
     ['EURUSD_otc', base / 1000 + 1, 1.10],
     ['EURUSD_otc', base / 1000 + 2, 1.20],
     ['EURUSD_otc', base / 1000 + 3, 1.05]
-  ], base + 10_000);
-  const candles = service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 10_000, includeIncomplete: true });
+  ], base + 4_000);
+  const candles = service.getCandles('EURUSD_OTC', 'S5', { asOf: base + 4_000, includeIncomplete: true });
   assert.equal(candles.length, 1);
   assert.equal(candles[0].source, 'live-ticks');
   assert.equal(candles[0].complete, false);
