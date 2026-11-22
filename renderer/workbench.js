@@ -103,27 +103,31 @@
   async function loadCandles() {
     const asset=$('wb-asset').value, timeframe=$('wb-timeframe').value, limit=Number($('wb-limit').value);
     if(!asset)throw new Error('Сначала выбери OTC-пару.');
-    say('Запрашиваю исторические свечи у Pocket Option…');
-    const history=await api.requestAnalysisHistory({asset,timeframe});
-    const diagnostics=await api.getAnalysisDiagnostics({asset,timeframe});
-    console.info('[Pocket Tracker] История Pocket Option', diagnostics);
-    if(!history.ok) {
-      candles=[];
-      selection={start:null,entry:null,end:null};
-      renderSelection();
-      throw new Error(history.reason || 'Pocket Option не подтвердил получение новой OHLC-истории.');
-    }
     candles=await api.getAnalysisCandles({asset,timeframe,limit});
-    if(!candles.length)throw new Error('Pocket Option подтвердил историю, но в хранилище нет закрытых OHLC-свечей.');
-
-    selection={start:null,entry:null,end:null};activeCandleIndex=candles.length-1;renderSelection();
-    const first=candles[0],last=candles[candles.length-1];
-    const events=diagnostics.historyEvents||[];
-    const providerCount=candles.filter(x=>x.source==='provider-ohlc').length,derivedCount=candles.filter(x=>x.source==='history-ticks').length;
-    const eventSummary=events.slice(-3).map(x=>x.eventName+': '+x.acceptedCandles+'/'+x.inputRows+' OHLC, layout '+(x.detectedLayout||'не определён')+', отброшено '+x.rejectedRows).join(' | ');
-    say('Свечей: '+candles.length+' (прямой OHLC: '+providerCount+', из исторических тиков: '+derivedCount+') · '+asset+' · '+timeframe+' · диапазон '+stamp(first.startAt)+' — '+stamp(last.endAt)+' · последняя C='+last.close+' H='+last.high+' L='+last.low+'. '+(eventSummary||'Нет диагностических событий истории.'));
-    console.info('[Pocket Tracker] История Pocket Option', diagnostics);
+    selection={start:null,entry:null,end:null};
+    activeCandleIndex=candles.length?candles.length-1:null;
+    renderSelection();
+    if(!candles.length) {
+      say('Ожидание живых тиков Pocket Option для '+asset+' · '+timeframe+'. Исторические данные отключены.');
+      return;
+    }
+    const last=candles[candles.length-1];
+    say('Живой график · '+asset+' · '+timeframe+' · свечей текущей сессии: '+candles.length+
+      ' · последняя цена '+priceText(last.close)+' · обновляется по тикам Pocket Option.');
     await refreshExamples();
+  }
+  async function refreshLiveChart() {
+    const asset=$('wb-asset').value;
+    if(!asset)return;
+    try {
+      const limit=Number($('wb-limit').value)||300;
+      const next=await api.getAnalysisCandles({asset,timeframe:$('wb-timeframe').value,limit});
+      candles=next;
+      activeCandleIndex=candles.length?candles.length-1:null;
+      renderSelection();
+      await refreshCurrentQuote();
+      if(!candles.length) say('Ожидание первого живого тика для '+asset+'. Исторические данные не используются.');
+    } catch(error) { console.warn('[Pocket Tracker] Ошибка обновления живого графика',error); }
   }
   async function refreshExamples() {
     examples=await api.listExamples({timeframe:$('wb-timeframe').value});
@@ -200,5 +204,7 @@
   $('wb-timeframe').addEventListener('change',()=>{selection={start:null,entry:null,end:null};refreshExamples().catch(e=>say(e.message));});
   document.querySelector('[data-page="workbench"]').addEventListener('click',()=>{loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));});
   api.onStatus?.(()=>{});
+  quoteTimer=setInterval(()=>refreshLiveChart(),1000);
+  $('wb-asset').addEventListener('change',()=>{candles=[];currentQuote=null;loadCandles().catch(e=>say(e.message));});
   loadAssets().catch(e=>say(e.message));refreshExamples().catch(e=>say(e.message));refreshJournal().catch(e=>say(e.message));loadAnalysisSettings().catch(e=>say(e.message));
 })();
