@@ -70,19 +70,24 @@ function normalizeHistoryRows(assetRaw, rows, periodRaw, receivedAt) {
       if (layout && row.length >= 5) {
         const open = Number(row[layout.open]), high = Number(row[layout.high]);
         const low = Number(row[layout.low]), close = Number(row[layout.close]);
-        if ([open, high, low, close].every(value => Number.isFinite(value) && value > 0)) {
-          ohlc = { open, high: Math.max(open, high, low, close), low: Math.min(open, high, low, close), close };
+        if ([open, high, low, close].every(value => Number.isFinite(value) && value > 0) &&
+            high >= Math.max(open, close, low) && low <= Math.min(open, close, high)) {
+          ohlc = { open, high, low, close };
           priceRaw = close;
         }
       }
-      if (priceRaw == null) priceRaw = row.length >= 5 ? row[2] : row[1];
+      // A five-column provider row is a candle, not a tick. If its OHLC
+      // layout cannot be validated, reject it rather than inventing a close
+      // and later rebuilding a different candle from sparse ticks.
+      if (priceRaw == null && row.length >= 5) continue;
+      if (priceRaw == null) priceRaw = row[1];
     } else if (typeof row === 'object') {
       timestampRaw = row.time ?? row.t ?? row.ts;
       priceRaw = row.close ?? row.c ?? row.price ?? row.p;
       const open = Number(row.open ?? row.o), high = Number(row.high ?? row.h);
       const low = Number(row.low ?? row.l), close = Number(row.close ?? row.c ?? priceRaw);
       if (periodMs && [open, high, low, close].every(value => Number.isFinite(value) && value > 0)) {
-        ohlc = { open, high: Math.max(open, high, low, close), low: Math.min(open, high, low, close), close };
+        if (high >= Math.max(open, close, low) && low <= Math.min(open, close, high)) ohlc = { open, high, low, close };
       }
     } else continue;
     const tick = normalizeTick(assetRaw, timestampRaw, priceRaw, receivedAt);
@@ -314,13 +319,10 @@ class MarketDataService {
     const historical = this.store.getCandles(asset, duration / 1000, 2000)
       .filter(candle => candle.endAt <= asOf && (options.includeIncomplete === true || candle.complete))
       .map(candle => ({ ...candle, timeframe: String(timeframe).toUpperCase() }));
-    const live = this.store.getAggregatedCandles(asset, timeframe, {
-      asOf, includeIncomplete: options.includeIncomplete === true
-    }).filter(candle => options.includeIncomplete === true || candle.complete);
-    const merged = new Map();
-    for (const candle of live) merged.set(candle.startAt, candle);
-    for (const candle of historical) merged.set(candle.startAt, candle);
-    return Array.from(merged.values()).sort((a, b) => a.startAt - b.startAt).slice(-limit);
+    // The workbench is a source-of-truth chart: show only provider OHLC
+    // candles. Tick aggregation is useful for diagnostics, but it is not
+    // interchangeable with Pocket Option's candle history.
+    return historical.sort((a, b) => a.startAt - b.startAt).slice(-limit);
   }
   getLatestDataTime(asset, timeframe) {
     const rows = this.getCandles(asset, timeframe, { limit: 2000 });
