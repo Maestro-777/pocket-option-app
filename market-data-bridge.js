@@ -33,7 +33,18 @@ function publish(name,payload,ws){
     const asset=data.asset||data.symbol,history=Array.isArray(data.history)?data.history:Array.isArray(data.data)?data.data:null;
     if(typeof asset==='string'&&asset.length<=64&&history&&history.length<=MAX_HISTORY){
      const clean=history.map(item=>Array.isArray(item)?item.slice(0,5).map(v=>typeof v==='string'?v.slice(0,32):v):item&&typeof item==='object'?{time:bounded(item.time),t:bounded(item.t),ts:bounded(item.ts),timestamp:bounded(item.timestamp),open:bounded(item.open),o:bounded(item.o),high:bounded(item.high),h:bounded(item.h),low:bounded(item.low),l:bounded(item.l),close:bounded(item.close),c:bounded(item.c),price:bounded(item.price),p:bounded(item.p)}:null).filter(Boolean);
-     safe.push({asset,period:data.period,history:clean});
+     const envelope={asset,period:data.period,history:clean};
+     // Preserve broker correlation metadata from Pocket Tracker 2.0.50.
+     // Without it the renderer cannot distinguish a late response from the
+     // currently requested pair/timeframe.
+     for(const key of ['index','requestId','request_id','id','symbol_id','symbolId','time','timestamp','offset','count','isEnd','end','hasMore']){
+      const value=data[key];
+      if(value==null)continue;
+      if(typeof value==='string')envelope[key]=value.slice(0,128);
+      else if(typeof value==='number'&&Number.isFinite(value))envelope[key]=value;
+      else if(typeof value==='boolean')envelope[key]=value;
+     }
+     safe.push(envelope);
     }
    }
   }else if(name==='updateAssets'){
